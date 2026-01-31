@@ -1,24 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Deriverse Trading Analytics
+
+Professional Solana trading analytics MVP: PnL tracking, equity curves, trade journal, and performance insights.
 
 ## Getting Started
 
-First, run the development server:
+1. Install dependencies:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. (Optional) Set Solana RPC in `.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+NEXT_PUBLIC_SOLANA_RPC=https://api.mainnet-beta.solana.com
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Run the dev server (port 3220):
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:3220](http://localhost:3220). Use **Demo Mode** on the landing page to view sample data without connecting a wallet.
+
+## Pages
+
+- **/** – Landing: Hero, wallet connection, Demo toggle, feature preview grid
+- **/dashboard** – Main analytics: PnL, performance grid, equity curve, long/short ratio, fee analysis, recent trades. Supports `?symbol=SOL&timeframe=7d`
+- **/journal** – Trade journal (filters + table). Supports `?trade_id=xyz`
+- **/settings** – Display, notifications, API keys
+
+## Stack
+
+Next.js 16, React 19, Tailwind 4, Solana wallet-adapter, Recharts, Zustand. Design: Deep Navy / Electric Blue / Emerald / Rose palette, Inter + JetBrains Mono.
 
 ## Learn More
 

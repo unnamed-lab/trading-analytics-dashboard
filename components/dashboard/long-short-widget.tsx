@@ -1,15 +1,24 @@
 "use client";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { MOCK_LONG_SHORT } from "@/lib/mock-data";
 import { useDemoStore } from "@/lib/stores/demo-store";
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
+import { useLongShortData } from "@/lib/stores/trade-selectors";
+import { MOCK_LONG_SHORT } from "@/lib/mock-data";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Legend,
+  Tooltip,
+} from "recharts";
 
 const COLORS = ["#22c55e", "#f43f5e"];
 
 export function LongShortWidget() {
   const { isDemoMode } = useDemoStore();
-  const { long, short } = isDemoMode ? MOCK_LONG_SHORT : MOCK_LONG_SHORT;
+  const realData = useLongShortData();
+  const { long, short } = isDemoMode ? MOCK_LONG_SHORT : realData;
   const data = [
     { name: "Long", value: long, color: COLORS[0] },
     { name: "Short", value: short, color: COLORS[1] },
@@ -18,7 +27,9 @@ export function LongShortWidget() {
   return (
     <Card>
       <CardHeader>
-        <h3 className="font-display text-sm font-semibold text-slate-200">Long / Short Ratio</h3>
+        <h3 className="font-display text-sm font-semibold text-slate-200">
+          Long / Short Ratio
+        </h3>
         <p className="text-xs text-slate-500">Position distribution</p>
       </CardHeader>
       <CardContent>

@@ -1,8 +1,10 @@
 "use client";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { MOCK_FEE_BREAKDOWN } from "@/lib/mock-data";
 import { useDemoStore } from "@/lib/stores/demo-store";
+import { useFeeAnalysisData } from "@/lib/stores/trade-selectors";
+import { MOCK_FEE_BREAKDOWN } from "@/lib/mock-data";
+import { formatCurrency } from "@/lib/utils/format";
 import {
   BarChart,
   Bar,
@@ -17,21 +19,47 @@ const BAR_COLORS = ["#0ea5e9", "#a78bfa", "#64748b"];
 
 export function FeeAnalysisWidget() {
   const { isDemoMode } = useDemoStore();
-  const data = isDemoMode ? MOCK_FEE_BREAKDOWN : MOCK_FEE_BREAKDOWN;
+  const realData = useFeeAnalysisData();
+  const data = isDemoMode ? MOCK_FEE_BREAKDOWN : realData;
   const total = data.reduce((s, d) => s + d.amount, 0);
+
+  // If no real data and not in demo mode, show placeholder
+  if (!isDemoMode && total === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <h3 className="font-display text-sm font-semibold text-slate-200">
+            Fee Analysis
+          </h3>
+          <p className="text-xs text-slate-500">No fee data available</p>
+        </CardHeader>
+        <CardContent>
+          <div className="h-40 w-full rounded-lg bg-white/[0.02] flex items-center justify-center">
+            <p className="text-slate-500 text-sm">No trades yet</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
       <CardHeader>
-        <h3 className="font-display text-sm font-semibold text-slate-200">Fee Analysis</h3>
+        <h3 className="font-display text-sm font-semibold text-slate-200">
+          Fee Analysis
+        </h3>
         <p className="text-xs text-slate-500">
-          Total: ${total.toFixed(2)} · Fee/PnL ratio in dashboard
+          Total: {formatCurrency(total)} · Fee/PnL ratio in dashboard
         </p>
       </CardHeader>
       <CardContent>
         <div className="h-40 w-full rounded-lg bg-white/[0.02]">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} layout="vertical" margin={{ left: 0, right: 8 }}>
+            <BarChart
+              data={data}
+              layout="vertical"
+              margin={{ left: 0, right: 8 }}
+            >
               <XAxis type="number" hide />
               <YAxis
                 type="category"
@@ -46,11 +74,14 @@ export function FeeAnalysisWidget() {
                   border: "1px solid rgba(255,255,255,0.08)",
                   borderRadius: "12px",
                 }}
-                formatter={(value: number) => [`$${value.toFixed(2)}`, ""]}
+                formatter={(value: number) => [formatCurrency(value), ""]}
               />
               <Bar dataKey="amount" radius={[0, 8, 8, 0]} maxBarSize={24}>
                 {data.map((_, index) => (
-                  <Cell key={`cell-${index}`} fill={BAR_COLORS[index % BAR_COLORS.length]} />
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={BAR_COLORS[index % BAR_COLORS.length]}
+                  />
                 ))}
               </Bar>
             </BarChart>

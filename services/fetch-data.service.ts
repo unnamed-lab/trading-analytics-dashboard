@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import 'dotenv/config';
 import {
   Signature,
   address, 
@@ -59,7 +60,7 @@ export class TransactionDataFetcher {
   private engine: Engine | null = null;
   private requestDelayMs: number = 300;
   private maxTransactions: number = 1000;
-  private programId: string = "Drvrseg8AQLP8B96DBGmHRjFGviFNYTkHueY9g3k27Gu";
+  private programId: string;
   private version: number = 14;
   private engineInitialized: boolean = false;
   
@@ -73,6 +74,7 @@ export class TransactionDataFetcher {
     this.rpc = createSolanaRpc(devnet(rpcUrl));
     this.requestDelayMs = requestDelayMs;
     this.maxTransactions = maxTransactions;
+    this.programId = process.env.PROGRAM_ID!
     
     if (programId) {
       this.programId = programId;
@@ -309,6 +311,121 @@ export class TransactionDataFetcher {
     }
   }
 
+  /**
+   * Fetch trades for a specific instrument from spot orders
+   */
+  async fetchTradesForInstrument(instrumentId: number): Promise<TradeRecord[]> {
+    if (!this.engineInitialized || !this.engine) {
+      console.warn('⚠️ Engine not initialized, cannot fetch instrument trades');
+      return [];
+    }
+
+    try {
+      const trades: TradeRecord[] = [];
+      
+      // Get client data for this instrument
+      const clientData = await this.engine.getClientData();
+      const spotData = clientData.spot?.get(instrumentId);
+      
+      if (!spotData) {
+        return [];
+      }
+
+      // Get spot orders info
+      const ordersInfo = await this.engine.getClientSpotOrdersInfo({instrId: instrumentId, clientId: clientData.clientId});
+      
+      // Get spot orders
+      const orders = await this.engine.getClientSpotOrders(
+        {
+            instrId: instrumentId, 
+            bidsCount: ordersInfo.bidsCount,
+            asksCount: ordersInfo.asksCount,
+            bidsEntry: ordersInfo.bidsEntry,
+            asksEntry: ordersInfo.asksEntry
+        });     
+      
+      // Process bids (buy orders)
+      if (orders.bids && Array.isArray(orders.bids)) {
+        orders.bids.forEach((bid: any, index: number) => {
+          trades.push({
+            id: `spot-bid-${instrumentId}-${index}-${Date.now()}`,
+            timestamp: new Date(),
+            section: this.formatSection(new Date()),
+            symbol: this.getSymbolFromInstrId(instrumentId),
+            instrument: this.getInstrumentFromInstrId(instrumentId),
+            side: 'buy',
+            entryPrice: Number(bid.price) / 1e9,
+            exitPrice: Number(bid.price) / 1e9,
+            quantity: Number(bid.qty) / 1e9,
+            amount: Number(bid.qty) / 1e9,
+            value: (Number(bid.price) * Number(bid.qty)) / 1e18,
+            orderType: bid.orderType === 1 ? 'limit' : 'market',
+            clientId: spotData.clientId?.toString() || 'unknown',
+            orderId: bid.orderId?.toString() || 'unknown',
+            transactionHash: 'spot-order',
+            fees: {
+              maker: 0,
+              taker: 0,
+              total: 0,
+              rebates: 0,
+            },
+            pnl: 0,
+            pnlPercentage: 0,
+            duration: 0,
+            status: 'open',
+            notes: `Spot ${bid.orderType === 1 ? 'Limit' : 'Market'} Buy Order`,
+            tradeType: 'spot',
+            logType: 'SpotOrder',
+            discriminator: 10,
+          });
+        });
+      }
+      
+      // Process asks (sell orders)
+      if (orders.asks && Array.isArray(orders.asks)) {
+        orders.asks.forEach((ask: any, index: number) => {
+          trades.push({
+            id: `spot-ask-${instrumentId}-${index}-${Date.now()}`,
+            timestamp: new Date(),
+            section: this.formatSection(new Date()),
+            symbol: this.getSymbolFromInstrId(instrumentId),
+            instrument: this.getInstrumentFromInstrId(instrumentId),
+            side: 'sell',
+            entryPrice: Number(ask.price) / 1e9,
+            exitPrice: Number(ask.price) / 1e9,
+            quantity: Number(ask.qty) / 1e9,
+            amount: Number(ask.qty) / 1e9,
+            value: (Number(ask.price) * Number(ask.qty)) / 1e18,
+            orderType: ask.orderType === 1 ? 'limit' : 'market',
+            clientId: spotData.clientId?.toString() || 'unknown',
+            orderId: ask.orderId?.toString() || 'unknown',
+            transactionHash: 'spot-order',
+            fees: {
+              maker: 0,
+              taker: 0,
+              total: 0,
+              rebates: 0,
+            },
+            pnl: 0,
+            pnlPercentage: 0,
+            duration: 0,
+            status: 'open',
+            notes: `Spot ${ask.orderType === 1 ? 'Limit' : 'Market'} Sell Order`,
+            tradeType: 'spot',
+            logType: 'SpotOrder',
+            discriminator: 10,
+          });
+        });
+      }
+      
+      return trades;
+    } catch (error: any) {
+      console.error(`Error fetching trades for instrument ${instrumentId}:`, error.message);
+      return [];
+    }
+  }
+
+
   private async fetchAndParseTransaction(
     signature: string, 
     sigInfo: any, 
@@ -390,6 +507,7 @@ export class TransactionDataFetcher {
                       break; 
                     }
                   } catch (fmtErr: any) {
+                    console.error(fmtErr)
                     // Try next format silently
                   }
                 }
@@ -437,13 +555,20 @@ export class TransactionDataFetcher {
           const orderId = (event as any).orderId || null;
           const clientId = (event as any).clientId || null;
           const tag = event.tag || null;
+          const instrumentId = this.extractInstrumentId(event);
+
           
           const tradeRecord: TradeRecord = {
             id: `${tag === 11 ? 'spot' : tag === 19 ? 'perp' : 'trade'}-fill-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
             timestamp: sigInfo.blockTime ? new Date(Number(sigInfo.blockTime) * 1000) : new Date(),
             section: this.formatSection(sigInfo.blockTime ? new Date(Number(sigInfo.blockTime) * 1000) : new Date()),
-            symbol: this.getSymbolFromInstrId((event as any).crncy),
+            symbol: instrumentId !== undefined 
+                ? this.getSymbolFromInstrId(instrumentId) 
+                : 'UNKNOWN',
             side: side as 'buy' | 'sell',
+            instrument: instrumentId !== undefined
+                ? this.getInstrumentFromInstrId(instrumentId)
+                : 'UNKNOWN',
             entryPrice: price ? Number(price) : 0,
             exitPrice: price ? Number(price) : 0,
             quantity: size || 0,
@@ -671,12 +796,15 @@ export class TransactionDataFetcher {
         const price = scaleValue(spotFill.price || 0);
         const value = scaleValue(spotFill.crncy || 0);
         const rebates = spotFill.rebates ? -Number(spotFill.rebates) / 1e9 : 0;
-        
+
+        const instrumentId = this.extractInstrumentId(spotFill) ?? spotFill.crncy;
+
         return {
           id: `spot-fill-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getSymbolFromInstrId(spotFill.crncy),
+          symbol: this.getSymbolFromInstrId(instrumentId),
+          instrument: this.getInstrumentFromInstrId(instrumentId),   
           side: isBuy ? 'buy' : 'sell',
           entryPrice: price,
           exitPrice: price,
@@ -713,11 +841,13 @@ export class TransactionDataFetcher {
         const value = scaleValue(perpFill.crncy || 0);
         const rebates = perpFill.rebates ? -Number(perpFill.rebates) / 1e9 : 0;
         
+        const instrumentId = this.extractInstrumentId(perpFill) ?? perpFill.crncy;
         return {
           id: `perp-fill-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getSymbolFromInstrId(perpFill.crncy),
+          symbol: this.getSymbolFromInstrId(instrumentId),
+          instrument: this.getInstrumentFromInstrId(instrumentId),
           side: isLong ? 'long' : 'short',
           entryPrice: price,
           exitPrice: price,
@@ -750,11 +880,14 @@ export class TransactionDataFetcher {
         const isReceived = funding.funding > 0;
         const fundingValue = scaleValue(funding.funding || 0);
         
+        const instrumentId = this.extractInstrumentId(funding) ?? funding.instrId;
+        
         return {
           id: `funding-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getSymbolFromInstrId(funding.instrId),
+          symbol: this.getSymbolFromInstrId(instrumentId),
+          instrument: this.getInstrumentFromInstrId(instrumentId),
           side: isReceived ? 'long' : 'short',
           entryPrice: 0,
           exitPrice: 0,
@@ -762,7 +895,6 @@ export class TransactionDataFetcher {
           amount: Math.abs(fundingValue),
           value: Math.abs(fundingValue),
           orderType: 'unknown',
-          instrument: this.getInstrumentFromInstrId(funding.instrId),
           clientId: funding.clientId?.toString() || 'unknown',
           orderId: 'N/A',
           transactionHash: signature,
@@ -917,15 +1049,6 @@ export class TransactionDataFetcher {
     return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
   }
 
-  private getSymbolFromInstrId(instrId?: number): string {
-    const symbolMap: Record<number, string> = {
-      1: 'SOL/USDC',
-      2: 'BTC/USDC',
-      3: 'ETH/USDC',
-    };
-    return symbolMap[instrId || 0] || `INSTR-${instrId || 'UNKNOWN'}`;
-  }
-
   private getInstrumentFromInstrId(instrId?: number): string {
     return this.getSymbolFromInstrId(instrId);
   }
@@ -939,6 +1062,107 @@ export class TransactionDataFetcher {
     };
     return tokenMap[tokenId || 0] || `TOKEN-${tokenId || 'UNKNOWN'}`;
   }
+
+  private extractInstrumentId(event: any): number | undefined {
+  if (!event) return undefined;
+  
+  // Priority order of field names based on Deriverse kit
+  // 1. For fill events: crncy (as seen in SpotFillOrderReportModel, PerpFillOrderReportModel)
+  // 2. For funding/socLoss: instrId (as seen in PerpFundingReportModel, PerpSocLossReportModel)
+  // 3. For deposit/withdraw: tokenId (as seen in DepositReportModel, WithdrawReportModel)
+  // 4. For other events: instrumentId, marketId, etc.
+  
+  const fieldPriority = [
+    'crncy',      // Spot/Perp fills
+    'instrId',    // Funding, SocLoss, other perp events
+    'tokenId',    // Deposits, withdrawals
+    'instrumentId',
+    'marketId',
+    'baseCrncyId'
+  ];
+  
+  for (const field of fieldPriority) {
+    if (event[field] !== undefined && event[field] !== null) {
+      let value = event[field];
+      
+      // Handle different value types
+      if (typeof value === 'object') {
+        if (value?.toNumber) value = value.toNumber();
+        else if (value?.toString) value = Number(value.toString());
+        else continue;
+      }
+      
+      // Convert to number
+      const numValue = Number(value);
+      if (isNaN(numValue)) continue;
+      
+      // Check if it's scaled (most Deriverse values are in 1e9 scale)
+      if (numValue > 1e9) {
+        return numValue / 1e9;
+      }
+      
+      return numValue;
+    }
+  }
+  
+  // Try to extract from raw log as fallback
+  if (event.rawLogMessage) {
+    const instrMatch = event.rawLogMessage.match(/instr[Ii]d[=:]\s*(\d+)/i);
+    if (instrMatch) return parseInt(instrMatch[1], 10);
+    
+    const crncyMatch = event.rawLogMessage.match(/crncy[=:]\s*(\d+)/i);
+    if (crncyMatch) return parseInt(crncyMatch[1], 10);
+    
+    const tokenMatch = event.rawLogMessage.match(/token[Ii]d[=:]\s*(\d+)/i);
+    if (tokenMatch) return parseInt(tokenMatch[1], 10);
+  }
+  
+  return undefined;
+}
+
+// Update the getSymbolFromInstrId with better mapping
+private getSymbolFromInstrId(instrId?: number): string {
+  if (instrId === undefined || instrId === null) {
+    return 'UNKNOWN';
+  }
+
+  // Ensure it's a number
+  let id: number;
+  if (typeof instrId === 'string') {
+    id = parseInt(instrId, 10);
+    if (isNaN(id)) return `INSTR-${instrId}`;
+  } else {
+    id = instrId;
+  }
+
+  // Deriverse instrument ID mapping (based on common patterns)
+  const symbolMap: Record<number, string> = {
+    0: 'USDC',      // Sometimes used for USDC
+    1: 'SOL/USDC',
+    2: 'BTC/USDC',
+    3: 'ETH/USDC',
+    4: 'APT/USDC',
+    5: 'ARB/USDC',
+    6: 'OP/USDC',
+    7: 'MATIC/USDC',
+    8: 'AVAX/USDC',
+    9: 'BNB/USDC',
+    10: 'LINK/USDC',
+    11: 'UNI/USDC',
+    12: 'AAVE/USDC',
+    13: 'ATOM/USDC',
+    14: 'DOT/USDC',
+    15: 'NEAR/USDC',
+    16: 'FTM/USDC',
+    17: 'ALGO/USDC',
+    18: 'FLOW/USDC',
+    19: 'ICP/USDC',
+    20: 'FIL/USDC',
+  };
+
+  return symbolMap[id] || `INSTR-${id}`;
+}
+
 
   // Export to CSV
   exportToCSV(tradeRecords: TradeRecord[]): string {

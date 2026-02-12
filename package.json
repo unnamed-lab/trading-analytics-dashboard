@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:fetcher": "tsx scripts/fetch-data.script.ts"
+    "test:fetcher": "tsx scripts/fetch-data.script.ts all",
+    "test:fetcher:full": "tsx scripts/fetch-data.script.ts full"
   },
   "dependencies": {
     "@deriverse/kit": "^1.0.39",

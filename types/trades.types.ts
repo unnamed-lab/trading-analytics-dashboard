@@ -1,28 +1,72 @@
+// Define your TradeRecord interface
 export interface TradeRecord {
   id: string;
   timestamp: Date;
-  symbol?: string;
+  section?: string;
+  symbol: string;
   side: 'long' | 'short' | 'buy' | 'sell';
   entryPrice: number;
   exitPrice: number;
   quantity: number;
-  orderType: string;
+  amount?: number;
+  value?: number;
+  orderType: 'limit' | 'market' | 'cancel' | 'revoke' | 'unknown';
+  instrument?: string;
+  clientId: string;
+  orderId: string;
+  transactionHash: string;
   fees: {
     maker: number;
     taker: number;
     total: number;
+    rebates?: number;
   };
   pnl: number;
   pnlPercentage: number;
   duration: number;
   status: 'win' | 'loss' | 'breakeven';
-  clientId: string;
-  instrId: number;
-  orderId?: string;
-  transactionHash?: string;
   notes?: string;
+  tradeType?: 'spot' | 'perp';
+  fundingPayments?: number;
+  socializedLoss?: number;
+  logType?: string;
+  discriminator?: number;
+  rawLogMessage?: string;
 }
 
+
+// New types for Deriverse-specific data
+export interface DeriverseTradeEvent {
+  tag: number; // LogType enum value
+  side: number; // 0 for buy/long, 1 for sell/short
+  clientId: number;
+  orderId: number;
+  // Spot specific
+  qty?: number;
+  crncy?: number;
+  price?: number;
+  rebates?: number;
+  // Perp specific
+  perps?: number;
+  funding?: number;
+  socLoss?: number;
+  time?: number;
+}
+
+export interface DeriverseFeeEvent {
+  tag: number;
+  refClientId: number;
+  fees: number;
+  refPayment: number;
+}
+
+export interface DeriverseFundingEvent {
+  tag: number;
+  clientId: number;
+  instrId: number;
+  time: number;
+  funding: number;
+}
 export interface PerformanceMetrics {
   totalTrades: number;
   winningTrades: number;

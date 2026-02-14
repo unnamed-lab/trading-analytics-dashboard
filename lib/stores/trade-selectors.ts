@@ -1,244 +1,93 @@
-import { useTradeStore } from './trade-store';
-// import { useFilterStore } from './filter-store';
+// lib/stores/trade-selectors.ts
+import { useTradeData } from '@/hooks/use-trade-data';
+import { useUIStore } from './trade-store';
+import { MOCK_JOURNAL_TRADES } from '@/lib/mock-data';
 
-// Dashboard metrics selector
-export const useDashboardMetrics = () => {
-  const metrics = useTradeStore((state) => state.metrics);
-//   const { timeframe } = useFilterStore();
-
-  if (!metrics) {
-    return {
-      totalTrades: 0,
-      winRate: 0,
-      totalPnL: 0,
-      profitFactor: 0,
-      maxDrawdown: 0,
-      averageTradeDuration: 0,
-      largestGain: 0,
-      largestLoss: 0,
-      longShortRatio: 0,
-      averageWin: 0,
-      averageLoss: 0,
-    };
-  }
-
-  // Apply timeframe filter logic here if needed
-  return {
-    totalTrades: metrics.totalTrades,
-    winRate: metrics.winRate,
-    totalPnL: metrics.totalPnL,
-    profitFactor: metrics.profitFactor,
-    maxDrawdown: metrics.maxDrawdown,
-    averageTradeDuration: metrics.averageTradeDuration,
-    largestGain: metrics.largestGain,
-    largestLoss: metrics.largestLoss,
-    longShortRatio: metrics.longShortRatio,
-    averageWin: metrics.averageWin,
-    averageLoss: metrics.averageLoss,
-  };
-};
-
-// Trade table data selector
+// These selectors now use React Query directly
 export const useTradeTableData = () => {
-  const filteredTrades = useTradeStore((state) => state.filteredTrades);
+  const { isDemoMode } = useUIStore();
+  const { journalTrades } = useTradeData();
   
-  return filteredTrades.slice(0, 10).map((trade) => ({
+  if (isDemoMode) return MOCK_JOURNAL_TRADES;
+  
+  return journalTrades.slice(0, 10).map((trade) => ({
     id: trade.id,
-    date: trade.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    time: trade.timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-    symbol: trade.symbol || `INSTR_${trade.instrId}`,
+    date: trade.time,
+    time: trade.time,
+    symbol: trade.symbol,
     side: trade.side,
     entry: trade.entryPrice.toFixed(4),
     exit: trade.exitPrice.toFixed(4),
-    quantity: trade.quantity.toFixed(4),
+    quantity: trade.size,
     pnl: trade.pnl,
-    pnlPercent: trade.pnlPercentage,
-    status: trade.status,
-    duration: trade.duration,
-    type: trade.orderType,
-    notes: trade.notes,
+    pnlPercent: trade.pnlPercent,
+    status: trade.pnl >= 0 ? 'win' : 'loss',
+    duration: 0,
+    type: 'market',
+    notes: trade.setup,
   }));
 };
 
-// PnL chart data selector
-export const usePnLChartData = () => {
-  const filteredTrades = useTradeStore((state) => state.filteredTrades);
-//   const { timeframe } = useFilterStore();
-  
-  if (filteredTrades.length === 0) {
-    return [];
-  }
-
-  // Sort by date and calculate cumulative PnL
-  const sortedTrades = [...filteredTrades].sort((a, b) => 
-    a.timestamp.getTime() - b.timestamp.getTime()
-  );
-
-  let cumulativePnL = 0;
-  return sortedTrades.map((trade, index) => {
-    // eslint-disable-next-line react-hooks/immutability
-    cumulativePnL += trade.pnl;
-    return {
-      date: trade.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      timestamp: trade.timestamp,
-      pnl: trade.pnl,
-      cumulativePnL,
-      tradeCount: index + 1,
-    };
-  });
-};
-
-// Equity curve data selector
-export const useEquityCurveData = () => {
-  const pnlData = usePnLChartData();
-  
-  if (pnlData.length === 0) {
-    return [];
-  }
-
-  // Start with initial equity of 10000 and add PnL
-  let equity = 10000;
-  return pnlData.map((data, index) => {
-    // eslint-disable-next-line react-hooks/immutability
-    equity += data.pnl;
-    return {
-      date: index === 0 || index === pnlData.length - 1 || index % Math.max(1, Math.floor(pnlData.length / 6)) === 0 
-        ? data.date 
-        : '',
-      value: equity,
-      pnl: data.pnl,
-    };
-  });
-};
-
-// Fee analysis selector
-export const useFeeAnalysisData = () => {
-  const feeAnalysis = useTradeStore((state) => state.feeAnalysis);
-  
-  if (!feeAnalysis) {
-    return [];
-  }
-
-  return [
-    { type: 'Maker', amount: feeAnalysis.makerFees },
-    { type: 'Taker', amount: feeAnalysis.takerFees },
-    { type: 'Total', amount: feeAnalysis.totalFees },
-  ];
-};
-
-// Long/Short ratio selector
-export const useLongShortData = () => {
-  const filteredTrades = useTradeStore((state) => state.filteredTrades);
-  
-  if (filteredTrades.length === 0) {
-    return { long: 50, short: 50 };
-  }
-
-  const longTrades = filteredTrades.filter(t => t.side === 'long').length;
-  const shortTrades = filteredTrades.filter(t => t.side === 'short').length;
-  const total = longTrades + shortTrades;
-  
-  return {
-    long: total > 0 ? Math.round((longTrades / total) * 100) : 50,
-    short: total > 0 ? Math.round((shortTrades / total) * 100) : 50,
-  };
-};
-
-// Performance metrics selector
 export const usePerformanceMetricsData = () => {
-  const metrics = useTradeStore((state) => state.metrics);
+  const { isDemoMode } = useUIStore();
+  const { performanceMetrics } = useTradeData();
   
-  if (!metrics) {
-    return {
-      winRate: 0,
-      avgWin: 0,
-      avgLoss: 0,
-      profitFactor: 0,
-    };
-  }
-
+  if (isDemoMode) return MOCK_DATA.performanceMetrics;
+  
   return {
-    winRate: metrics.winRate,
-    avgWin: metrics.averageWin,
-    avgLoss: metrics.averageLoss,
-    profitFactor: metrics.profitFactor,
+    winRate: Number(performanceMetrics.winRate.toFixed(1)),
+    avgWin: Number(performanceMetrics.avgWin.toFixed(2)),
+    avgLoss: Number(performanceMetrics.avgLoss.toFixed(2)),
+    profitFactor: Number(performanceMetrics.profitFactor.toFixed(2)),
   };
 };
 
-// PnL Overview selector
 export const usePnLOverviewData = () => {
-  const filteredTrades = useTradeStore((state) => state.filteredTrades);
-  const metrics = useTradeStore((state) => state.metrics);
+  const { isDemoMode } = useUIStore();
+  const { pnlOverview } = useTradeData();
   
-  if (filteredTrades.length === 0 || !metrics) {
-    return {
-      total: 0,
-      realized: 0,
-      unrealized: 0,
-      roiPercent: 0,
-      dailyChange: 0,
-    };
-  }
-
-  // Calculate realized vs unrealized (simplified)
-  const realizedTrades = filteredTrades.filter(t => t.status !== 'breakeven');
-  const realized = realizedTrades.reduce((sum, t) => sum + t.pnl, 0);
-  const total = metrics.totalPnL;
-  const unrealized = total - realized;
+  if (isDemoMode) return MOCK_DATA.pnlOverview;
   
-  // Calculate ROI percentage (assuming starting capital of 10000)
-  const roiPercent = (total / 10000) * 100;
-  
-  // Calculate daily change (simplified)
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  
-  const yesterdayTrades = filteredTrades.filter(t => 
-    t.timestamp.getDate() === yesterday.getDate() &&
-    t.timestamp.getMonth() === yesterday.getMonth() &&
-    t.timestamp.getFullYear() === yesterday.getFullYear()
-  );
-  
-  const todayTrades = filteredTrades.filter(t => 
-    t.timestamp.getDate() === today.getDate() &&
-    t.timestamp.getMonth() === today.getMonth() &&
-    t.timestamp.getFullYear() === today.getFullYear()
-  );
-  
-  const yesterdayPnL = yesterdayTrades.reduce((sum, t) => sum + t.pnl, 0);
-  const todayPnL = todayTrades.reduce((sum, t) => sum + t.pnl, 0);
-  const dailyChange = yesterdayPnL !== 0 ? ((todayPnL - yesterdayPnL) / Math.abs(yesterdayPnL)) * 100 : 0;
-
   return {
-    total,
-    realized,
-    unrealized,
-    roiPercent,
-    dailyChange,
+    total: Number(pnlOverview.total.toFixed(2)),
+    realized: Number(pnlOverview.realized.toFixed(2)),
+    unrealized: Number(pnlOverview.unrealized.toFixed(2)),
+    roiPercent: Number(pnlOverview.roiPercent.toFixed(2)),
+    dailyChange: Number(pnlOverview.dailyChange.toFixed(2)),
   };
 };
 
-// Daily PnL data selector
+export const useLongShortData = () => {
+  const { isDemoMode } = useUIStore();
+  const { longShortRatio } = useTradeData();
+  
+  return isDemoMode ? MOCK_DATA.longShort : longShortRatio;
+};
+
+export const useEquityCurveData = () => {
+  const { isDemoMode } = useUIStore();
+  const { equityCurveData } = useTradeData();
+  
+  return isDemoMode ? MOCK_DATA.equityCurve : equityCurveData;
+};
+
 export const useDailyPnLData = () => {
-  const filteredTrades = useTradeStore((state) => state.filteredTrades);
+  const { isDemoMode } = useUIStore();
+  const { dailyPnLData } = useTradeData();
   
-  if (filteredTrades.length === 0) {
-    return [];
-  }
+  return isDemoMode ? MOCK_DATA.dailyPnL : dailyPnLData;
+};
 
-  // Group trades by day
-  const dailyData = new Map<string, number>();
+export const useFeeAnalysisData = () => {
+  const { isDemoMode } = useUIStore();
+  const { feeAnalysisData } = useTradeData();
   
-  filteredTrades.forEach(trade => {
-    const dateKey = trade.timestamp.toLocaleDateString('en-US', { weekday: 'short' });
-    dailyData.set(dateKey, (dailyData.get(dateKey) || 0) + trade.pnl);
-  });
+  return isDemoMode ? MOCK_DATA.feeBreakdown : feeAnalysisData;
+};
 
-  // Ensure we have data for all days of the week
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  return days.map(day => ({
-    date: day,
-    pnl: dailyData.get(day) || 0,
-  }));
+export const useDashboardMetrics = () => {
+  const { isDemoMode } = useUIStore();
+  const { dashboardMetrics } = useTradeData();
+  
+  return isDemoMode ? MOCK_DATA.dashboardMetrics : dashboardMetrics;
 };

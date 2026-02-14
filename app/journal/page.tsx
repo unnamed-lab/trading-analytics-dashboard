@@ -1,179 +1,229 @@
 "use client";
 
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { BookOpen, Filter, ExternalLink } from "lucide-react";
-import { useDemoStore } from "@/lib/stores/demo-store";
+import { useState } from "react";
 import {
-  MOCK_JOURNAL_TRADES,
-  formatCurrency,
-  formatPercent,
-  type JournalTrade,
-} from "@/lib/mock-data";
-import { cn } from "@/lib/utils";
+  Plus,
+  ArrowRight,
+  Sparkles,
+  ChevronDown,
+  TrendingUp,
+  Download,
+} from "lucide-react";
+import { journals } from "@/data/mockTrades";
+import type { Journal } from "@/types";
+import { formatSide, isBullishSide, formatPnl } from "@/types";
+import { useRouter } from "next/navigation";
 
-function JournalTable({ trades }: { trades: JournalTrade[] }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-white/[0.08] bg-white/[0.02]">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-white/[0.08] text-left text-slate-500">
-            <th className="px-4 py-3 font-medium">Symbol</th>
-            <th className="px-4 py-3 font-medium">Side</th>
-            <th className="px-4 py-3 font-medium">Entry → Exit</th>
-            <th className="px-4 py-3 font-medium">Size</th>
-            <th className="px-4 py-3 font-medium text-right">PnL</th>
-            <th className="px-4 py-3 font-medium text-right">%</th>
-            <th className="px-4 py-3 font-medium">Time</th>
-            <th className="px-4 py-3 font-medium">Setup</th>
-            <th className="w-8 px-2 py-3" aria-label="View" />
-          </tr>
-        </thead>
-        <tbody>
-          {trades.map((trade) => (
-            <tr
-              key={trade.id}
-              className="border-b border-white/[0.06] text-slate-300 transition-colors hover:bg-white/[0.04]"
-            >
-              <td className="px-4 py-3 font-medium text-slate-200">{trade.symbol}</td>
-              <td className="px-4 py-3">
-                <span
-                  className={cn(
-                    "rounded-md px-2 py-0.5 text-xs font-medium uppercase",
-                    trade.side === "long"
-                      ? "bg-[#22c55e]/15 text-[#22c55e]"
-                      : "bg-[#f43f5e]/15 text-[#f43f5e]"
-                  )}
-                >
-                  {trade.side}
-                </span>
-              </td>
-              <td className="px-4 py-3 text-data text-slate-400">
-                ${trade.entryPrice.toFixed(2)} → ${trade.exitPrice.toFixed(2)}
-              </td>
-              <td className="px-4 py-3 text-slate-400">{trade.size}</td>
-              <td
-                className={cn(
-                  "px-4 py-3 text-right text-data font-medium",
-                  trade.pnl >= 0 ? "text-[#22c55e]" : "text-[#f43f5e]"
-                )}
-              >
-                {formatCurrency(trade.pnl)}
-              </td>
-              <td
-                className={cn(
-                  "px-4 py-3 text-right text-data text-xs",
-                  trade.pnlPercent >= 0 ? "text-[#22c55e]" : "text-[#f43f5e]"
-                )}
-              >
-                {formatPercent(trade.pnlPercent)}
-              </td>
-              <td className="px-4 py-3 text-slate-500">{trade.time}</td>
-              <td className="px-4 py-3 text-slate-400">{trade.setup}</td>
-              <td className="px-2 py-3">
-                <Link
-                  href={`/journal?trade_id=${trade.id}`}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/10 hover:text-[#0ea5e9]"
-                  aria-label={`View trade ${trade.id}`}
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </Link>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+const filters = ["All Entries", "Winners", "Losers", "✦ AI Analyzed"];
 
-export default function JournalPage() {
-  const searchParams = useSearchParams();
-  const tradeId = searchParams.get("trade_id");
-  const { isDemoMode } = useDemoStore();
-  const trades = isDemoMode ? MOCK_JOURNAL_TRADES : [];
+const JournalsPage = () => {
+  const [activeFilter, setActiveFilter] = useState("All Entries");
+  const router = useRouter();
+
+  const filteredJournals = journals.filter((j) => {
+    if (activeFilter === "Winners") return j.pnl >= 0;
+    if (activeFilter === "Losers") return j.pnl < 0;
+    if (activeFilter === "✦ AI Analyzed") return j.aiAnalyzed;
+    return true;
+  });
 
   return (
-    <AppShell>
-      <div className="container mx-auto max-w-7xl px-4 py-8 md:py-10">
-        <div className="mb-8">
-          <h1 className="font-display text-2xl font-semibold text-slate-100 sm:text-3xl">
-            Trade Journal
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Filter, annotate, and export your trade history.
-          </p>
+    <div className="px-4 sm:px-6 py-5">
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-3">
+          <div className="flex rounded border border-border overflow-hidden">
+            {filters.map((f) => (
+              <button
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  activeFilter === f
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+          <div className="hidden sm:block w-px h-6 bg-border" />
+          <button className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary transition-colors">
+            Sort by Date: Newest
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
         </div>
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
-          <aside className="lg:col-span-1">
-            <Card className="sticky top-24">
-              <CardHeader className="pb-2">
-                <div className="flex items-center gap-2.5">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/5 text-slate-400">
-                    <Filter className="h-4 w-4" />
-                  </span>
-                  <h2 className="font-display text-sm font-semibold text-slate-200">Filters</h2>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs leading-relaxed text-slate-500">
-                  Multi-criteria filtering, saved filters, and live counts will appear here.
-                </p>
-                {isDemoMode && (
-                  <p className="mt-3 text-xs font-medium text-[#22c55e]">
-                    Demo: {trades.length} trades shown
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </aside>
-          <div className="lg:col-span-3">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2.5">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0ea5e9]/15 text-[#0ea5e9]">
-                    <BookOpen className="h-5 w-5" />
-                  </span>
-                  <h2 className="font-display text-lg font-semibold text-slate-200">
-                    {tradeId ? `Trade ${tradeId}` : "All Trades"}
-                  </h2>
-                </div>
-                <p className="text-sm text-slate-500">
-                  {tradeId
-                    ? "Full trade analysis, chart comparison, and annotations."
-                    : "Sort, filter, pagination. TradeTable with virtual scrolling."}
-                </p>
-              </CardHeader>
-              <CardContent>
-                {tradeId ? (
-                  <div className="rounded-xl border border-white/10 bg-white/[0.02] p-6">
-                    <p className="text-sm text-slate-400">
-                      Trade detail view and annotations for trade_id={tradeId} will be implemented
-                      here.
-                    </p>
-                    <Link
-                      href="/journal"
-                      className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-[#0ea5e9] hover:underline"
-                    >
-                      ← Back to All Trades
-                    </Link>
-                  </div>
-                ) : isDemoMode && trades.length > 0 ? (
-                  <JournalTable trades={trades} />
-                ) : (
-                  <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-10 text-center text-sm text-slate-500">
-                    {!isDemoMode
-                      ? "Enable Demo mode from the header to see sample trades, or connect your wallet for live data."
-                      : "No trades to display."}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+        <p className="text-sm text-muted-foreground">
+          Showing{" "}
+          <span className="font-mono font-bold text-foreground">
+            {filteredJournals.length}
+          </span>{" "}
+          of{" "}
+          <span className="font-mono font-bold text-primary">
+            {journals.length}
+          </span>{" "}
+          journals
+        </p>
+      </div>
+
+      {/* Journal cards grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
+        {/* Log new trade card */}
+        <button
+          onClick={() => router.push("/journal/new")}
+          className="rounded-lg border-2 border-dashed border-border bg-card/50 p-6 flex flex-col items-center justify-center gap-3 hover:border-primary/50 hover:bg-card transition-all min-h-70"
+        >
+          <div className="h-10 w-10 rounded-full border border-border flex items-center justify-center">
+            <Plus className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-sm text-foreground">
+              Log New Trade
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Manually add a trade or import from history
+            </p>
+          </div>
+        </button>
+
+        {/* Journal cards */}
+        {filteredJournals.map((journal) => (
+          <JournalCard
+            key={journal.id}
+            journal={journal}
+            onClick={() => router.push(`/journal/${journal.id}`)}
+          />
+        ))}
+      </div>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-lg border border-border bg-card p-5">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            October Journal Entries
+          </p>
+          <p className="font-mono text-3xl font-bold text-foreground mt-2">
+            24
+          </p>
+          <div className="flex items-center gap-1 mt-2 text-xs text-profit">
+            <TrendingUp className="h-3 w-3" />
+            +4 vs Sept
           </div>
         </div>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            Review Pending
+          </p>
+          <p className="font-mono text-3xl font-bold text-foreground mt-2">3</p>
+          <p className="text-xs text-muted-foreground mt-2">Need analysis</p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            Win Rate (Journaled)
+          </p>
+          <p className="font-mono text-3xl font-bold text-foreground mt-2">
+            68%
+          </p>
+          <div className="mt-3 h-1.5 rounded-full bg-secondary overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full"
+              style={{ width: "68%" }}
+            />
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-5 flex items-center justify-center gap-2">
+          <Download className="h-5 w-5 text-muted-foreground" />
+          <span className="text-sm text-foreground">Export Journal Data</span>
+        </div>
       </div>
-    </AppShell>
+    </div>
   );
-}
+};
+
+const JournalCard = ({
+  journal,
+  onClick,
+}: {
+  journal: Journal;
+  onClick: () => void;
+}) => {
+  const isProfitable = journal.pnl >= 0;
+  const bullish = isBullishSide(journal.side);
+
+  return (
+    <div
+      onClick={onClick}
+      className="rounded-lg border border-border bg-card p-5 cursor-pointer hover:border-primary/30 transition-all flex flex-col justify-between min-h-70"
+    >
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <span className="font-mono text-xs text-muted-foreground">
+            {journal.date}
+          </span>
+          {journal.aiAnalyzed && (
+            <span className="flex items-center gap-1 rounded bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary uppercase tracking-wider">
+              <Sparkles className="h-3 w-3" />
+              AI Analyzed
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="font-mono text-lg font-bold text-foreground">
+            {journal.symbol}
+          </span>
+          <span
+            className={`rounded px-2 py-0.5 text-xs font-bold ${
+              bullish ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss"
+            }`}
+          >
+            {formatSide(journal.side)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <span className="text-xs text-muted-foreground">PnL</span>
+            <p
+              className={`font-mono text-lg font-bold ${isProfitable ? "text-profit" : "text-loss"}`}
+            >
+              {formatPnl(journal.pnl)}
+            </p>
+          </div>
+          <div className="text-right">
+            <span className="text-xs text-muted-foreground">ROI</span>
+            <p
+              className={`font-mono text-sm font-medium ${isProfitable ? "text-profit" : "text-loss"}`}
+            >
+              {journal.pnlPercentage >= 0 ? "+" : ""}
+              {journal.pnlPercentage}%
+            </p>
+          </div>
+        </div>
+        <div className="mb-4">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase mb-2">
+            Trade Notes
+          </p>
+          <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
+            {journal.notes}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center justify-between mt-auto pt-3">
+        <div className="flex gap-1.5">
+          {journal.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded border border-border bg-secondary/50 px-2 py-0.5 text-[10px] text-muted-foreground"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+        <button className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+          View Details <ArrowRight className="h-3 w-3" />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default JournalsPage;

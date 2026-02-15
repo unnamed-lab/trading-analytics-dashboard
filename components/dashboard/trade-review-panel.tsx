@@ -43,10 +43,10 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
   return (
     <div className="fixed inset-0 z-50 flex">
       <div
-        className="flex-1 bg-background/60 backdrop-blur-sm"
+        className="flex-1 bg-background backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="w-full sm:w-[420px] lg:w-[520px] bg-card border-l border-border overflow-y-auto animate-slide-in-right flex flex-col">
+      <div className="w-full sm:w-105 lg:w-130 bg-card border-l border-border overflow-y-auto animate-slide-in-right flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div className="flex items-center gap-3">
@@ -146,7 +146,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
         </div>
 
         {/* Price Action Chart */}
-        <div className="px-5">
+        {/* <div className="px-5">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
               Price Action
@@ -202,10 +202,10 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
             <span className="text-xs text-primary font-mono">ENTRY</span>
             <span className="text-xs text-profit font-mono">EXIT</span>
           </div>
-        </div>
+        </div> */}
 
         {/* Risk Analysis */}
-        <div className="p-5">
+        {/* <div className="p-5">
           <h4 className="text-xs font-medium tracking-wider text-muted-foreground uppercase mb-3">
             Risk Analysis
           </h4>
@@ -249,7 +249,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
               </div>
             ))}
           </div>
-        </div>
+        </div> */}
 
         {/* AI Insight */}
         <div className="px-5 pb-5">

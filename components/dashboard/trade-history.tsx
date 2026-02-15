@@ -1,13 +1,63 @@
+// components/dashboard/trade-history.tsx
+"use client";
+
 import { useState } from "react";
+import { useAllTrades, useMockTrades } from "@/hooks/use-trade-queries";
+import { useWallet } from "@solana/wallet-adapter-react";
 import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
-import { allTrades } from "@/data/mockTrades";
 import TradeReviewPanel from "./trade-review-panel";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 
 const TradeHistory = () => {
   const [selectedTrade, setSelectedTrade] = useState<TradeRecord | null>(null);
-  const recentTrades = allTrades.slice(0, 4);
+  const { connected, publicKey } = useWallet();
+
+  // Use real data if wallet is connected, otherwise use mock data
+  const { data: realTrades = [], isLoading: realLoading } = useAllTrades({
+    enabled: connected && !!publicKey,
+  });
+
+  const { data: mockTrades = [], isLoading: mockLoading } = useMockTrades({
+    enabled: !connected || process.env.NODE_ENV === "development",
+  });
+
+  const trades = connected ? realTrades : mockTrades;
+  const isLoading = connected ? realLoading : mockLoading;
+  const recentTrades = trades.slice(0, 4);
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-8">
+        <div className="flex items-center justify-center gap-2 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span>Loading trades...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!connected && trades.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-8">
+        <div className="text-center text-muted-foreground">
+          <p>Connect your wallet to view your trade history</p>
+          <p className="text-sm mt-2">or check back later for demo data</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (trades.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-8">
+        <div className="text-center text-muted-foreground">
+          No trades found for this wallet
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -52,7 +102,7 @@ const TradeHistory = () => {
                     onClick={() => setSelectedTrade(trade)}
                   >
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
-                      {trade.timestamp.toLocaleString()}
+                      {new Date(trade.timestamp).toLocaleString()}
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm font-medium text-foreground">
                       {trade.symbol}
@@ -81,7 +131,7 @@ const TradeHistory = () => {
                     >
                       {formatPnl(trade.pnl)}
                     </td>
-                    <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[200px] truncate">
+                    <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-50 truncate">
                       {trade.notes}
                     </td>
                   </tr>

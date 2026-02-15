@@ -13,6 +13,8 @@ import WalletConnectionOverlay from "./wallet-connection-overlay";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useRefreshTrades } from "@/hooks/use-trade-queries";
+import { cn } from "@/lib/utils";
 
 const navItems = [
   { label: "Dashboard", path: "/", icon: BarChart3 },
@@ -29,6 +31,8 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
     connecting,
     publicKey: address,
   } = useWallet();
+
+  const { mutate: refreshTrades, isPending: isRefreshing } = useRefreshTrades();
 
   return (
     <div className="min-h-screen bg-background">
@@ -57,8 +61,20 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
             <button className="p-2 rounded hover:bg-secondary text-muted-foreground transition-colors sm:hidden">
               <Search className="h-4 w-4" />
             </button>
-            <button className="p-2 rounded hover:bg-secondary text-muted-foreground transition-colors">
-              <RefreshCw className="h-4 w-4" />
+
+            <button
+              onClick={() => refreshTrades()}
+              className={cn(
+                "p-2 rounded hover:bg-secondary transition-colors",
+                isRefreshing
+                  ? "text-muted-foreground/60"
+                  : "text-muted-foreground",
+              )}
+              disabled={isRefreshing}
+            >
+              <RefreshCw
+                className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")}
+              />
             </button>
             <button className="hidden sm:flex p-2 rounded hover:bg-secondary text-muted-foreground transition-colors">
               <Download className="h-4 w-4" />

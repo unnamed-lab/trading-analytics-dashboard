@@ -10,13 +10,16 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:fetcher": "tsx scripts/fetch-data.script.ts all",
-    "test:fetcher:full": "tsx scripts/fetch-data.script.ts full"
+    "test:fetcher:full": "tsx scripts/fetch-data.script.ts full",
+    "test:fetcher:instrument": "tsx scripts/fetch-data.script.ts instrument",
+    "test:analytics": "tsx scripts/trade-analytics.script.ts"
   },
   "dependencies": {
     "@deriverse/kit": "^1.0.39",
     "@solana/codecs-strings": "^6.0.1",
     "@solana/kit": "^5.5.1",
     "@solana/rpc-types": "^6.0.1",
+    "@solana/spl-token-registry": "^0.2.4574",
     "@solana/wallet-adapter-base": "^0.9.23",
     "@solana/wallet-adapter-react": "^0.15.35",
     "@solana/wallet-adapter-react-ui": "^0.9.35",

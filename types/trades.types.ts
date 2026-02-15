@@ -1,19 +1,28 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================
 // Core Trade Types for Deriverse Analytics
 // ============================================
 
-export interface TradeRecord {
+export interface TradeRecord extends Partial<TradeComprehensiveRecord> {
   id: string;
   timestamp: Date;
   section?: string;
   symbol: string;
-  side: "long" | "short" | "buy" | "sell";
+  side: "long" | "short" | "buy" | "sell" | "unknown";
   entryPrice: number;
   exitPrice: number;
   quantity: number;
   amount?: number;
   value?: number;
-  orderType: "limit" | "market" | "cancel" | "revoke" | "unknown";
+  orderType:
+    | "limit"
+    | "market"
+    | "cancel"
+    | "revoke"
+    | "fee"
+    | "funding"
+    | "event"
+    | "unknown";
   instrument?: string;
   clientId: string;
   orderId: string;
@@ -23,18 +32,144 @@ export interface TradeRecord {
     taker: number;
     total: number;
     rebates?: number;
+    funding?: number; // For perp funding
+    socializedLoss?: number;
   };
   pnl: number;
   pnlPercentage: number;
   duration: number;
-  status: "win" | "loss" | "breakeven" | "open" | "close";
+  status:
+    | "win"
+    | "loss"
+    | "breakeven"
+    | "open"
+    | "close"
+    | "pending"
+    | "info"
+    | "unknown";
   notes?: string;
-  tradeType?: "spot" | "perp";
+  tradeType?: "spot" | "perp" | "swap" | "unknown";
   fundingPayments?: number;
   socializedLoss?: number;
   logType?: string;
   discriminator?: number;
   rawLogMessage?: string;
+  rawData?: any;
+}
+
+export interface TradeComprehensiveRecord {
+  pnl: number;
+  pnlPercentage: number;
+  fees: {
+    maker: number;
+    taker: number;
+    total: number;
+    rebates?: number;
+    funding?: number; // For perp funding
+    socializedLoss?: number;
+  };
+  entryPrice: number;
+  exitPrice: number;
+  entryTime: Date;
+  exitTime: Date;
+  duration: number; // in seconds
+  positionSize: number;
+  leverage?: number;
+
+  // Analytics tags
+  isWinner: boolean;
+  isLoser: boolean;
+  isBreakeven: boolean;
+  
+  // Risk metrics
+  riskAmount?: number; // Amount risked on this trade
+  riskRewardRatio?: number;
+
+  // Context
+  marketCondition?: "trending" | "ranging" | "volatile";
+  session?: "asia" | "london" | "ny" | "overlap";
+
+  // PnL components
+  pricePnl?: number; // PnL from price movement
+  fundingPnl?: number; // PnL from funding
+  feeImpact?: number; // Net fee impact
+}
+
+export interface TradeAnalytics {
+  // Core PnL
+  totalPnl: number;
+  unrealizedPnl: number;
+  realizedPnl: number;
+
+  // Win Rate
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number; // percentage
+
+  // Volume & Fees
+  totalVolume: number;
+  totalFees: number;
+  feeBreakdown: {
+    spotFees: number;
+    perpFees: number;
+    fundingPayments: number;
+    socializedLosses: number;
+  };
+
+  // Time Analysis
+  avgTradeDuration: number; // in seconds
+  tradesByTimeOfDay: Map<number, TradeRecord[]>; // hour -> trades
+  tradesByDayOfWeek: Map<number, TradeRecord[]>; // day -> trades
+
+  // Directional Bias
+  longTrades: number;
+  shortTrades: number;
+  longVolume: number;
+  shortVolume: number;
+  longShortRatio: number;
+
+  // Risk Metrics
+  largestGain: number;
+  largestLoss: number;
+  avgWinAmount: number;
+  avgLossAmount: number;
+  profitFactor: number; // gross profit / gross loss
+
+  // Drawdown
+  maxDrawdown: number;
+  currentDrawdown: number;
+  peakEquity: number;
+
+  // Symbol Performance
+  symbolPerformance: Map<
+    string,
+    {
+      pnl: number;
+      trades: number;
+      volume: number;
+      winRate: number;
+    }
+  >;
+
+  // Order Type Performance
+  orderTypePerformance: {
+    market: TradeStats;
+    limit: TradeStats;
+    stop: TradeStats;
+  };
+
+  // Historical
+  dailyPnl: Map<string, number>; // date -> pnl
+  cumulativePnl: number[];
+}
+
+export interface TradeStats {
+  count: number;
+  pnl: number;
+  volume: number;
+  wins: number;
+  losses: number;
 }
 
 // Journal entry linked to a trade
@@ -221,3 +356,4 @@ export function formatPnl(pnl: number): string {
   const prefix = pnl >= 0 ? "+" : "";
   return `${prefix}$${Math.abs(pnl).toFixed(2)}`;
 }
+

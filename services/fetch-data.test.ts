@@ -89,6 +89,20 @@ jest.mock('@solana/kit', () => ({
   })
 }));
 
+// Mock SPL Token Registry
+jest.mock('@solana/spl-token-registry', () => {
+  return {
+    TokenListProvider: jest.fn().mockImplementation(() => ({
+      resolve: jest.fn().mockResolvedValue({
+        getList: () => [
+          { address: 'BaseMint111', symbol: 'SOL' },
+          { address: 'QuoteMint222', symbol: 'USDC' }
+        ]
+      })
+    }))
+  };
+});
+
 describe('Test the TransactionDataFetcher Class', () => {
   let tradeFetcher: TransactionDataFetcher;
   const mockWallet = new PublicKey(process.env.DEBUG_SOLANA_WALLET || "11111111111111111111111111111111");
@@ -304,6 +318,34 @@ describe('Test the TransactionDataFetcher Class', () => {
       const trades = await freshFetcher.fetchTradesForInstrument(1);
       expect(trades).toEqual([]);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Engine not initialized'));
+    });
+  });
+
+  describe('resolveInstrumentDetails', () => {
+    it('uses token registry when engine.tokens not populated', async () => {
+      tradeFetcher = new TransactionDataFetcher(rpcUrl, programId, version);
+      await tradeFetcher.initialize(mockWallet);
+      const mockEngine = (tradeFetcher as any).engine;
+
+      // Make instruments.get return header with mints
+      mockEngine.instruments.get = jest.fn().mockReturnValue({
+        header: {
+          assetTokenId: 10,
+          crncyTokenId: 2,
+          assetMint: 'BaseMint111',
+          crncyMint: 'QuoteMint222'
+        }
+      });
+
+      // Ensure engine.tokens doesn't provide symbols
+      mockEngine.tokens = new Map();
+
+      const details = await (tradeFetcher as any).resolveInstrumentDetails(1);
+
+      expect(details).toBeDefined();
+      expect(details.symbol).toBe('SOL/USDC');
+      expect(details.base).toBe('SOL');
+      expect(details.quote).toBe('USDC');
     });
   });
 

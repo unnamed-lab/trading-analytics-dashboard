@@ -24,6 +24,8 @@ export interface TradeRecord extends Partial<TradeComprehensiveRecord> {
     | "event"
     | "new"
     | "deposit"
+    | "socLoss"
+    | "withdraw"
     | "unknown";
   instrument?: string;
   clientId: string;
@@ -169,7 +171,7 @@ export interface TradeAnalytics {
 export interface TradeStats {
   count: number;
   pnl: number;
-  volume: number;
+  volume?: number;
   wins: number;
   losses: number;
 }

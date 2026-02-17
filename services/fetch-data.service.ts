@@ -17,9 +17,46 @@ import {
 } from "@deriverse/kit";
 import EngineAdapter from "@/lib/deriverse-engine-adapter";
 import { TradeRecord } from "@/types";
-import { PerformanceAnalyzer } from "@/lib/analyzers/performance-analyzer";
+import { PnLCalculator } from "@/services/pnl-calculator.service";
 
-// Define a type for decoded log messages
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Safely converts any numeric-ish value (BN, BigInt, number, string) to a
+ * plain JS number.  Returns NaN if the conversion is not meaningful.
+ */
+function toNum(value: any): number {
+  if (value === null || value === undefined) return NaN;
+  if (typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  // BN.js / anchor BN
+  if (typeof value === "object" && typeof value.toNumber === "function") {
+    return value.toNumber();
+  }
+  if (typeof value === "object" && typeof value.toString === "function") {
+    const n = Number(value.toString());
+    return isNaN(n) ? NaN : n;
+  }
+  return Number(value);
+}
+
+/**
+ * Safely coerce any value to a string (avoids "[object Object]").
+ */
+function toStr(value: any): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "object" && typeof value.toString === "function") {
+    const s = value.toString();
+    // BN / PublicKey toString are fine; plain objects give "[object Object]"
+    return s === "[object Object]" ? JSON.stringify(value) : s;
+  }
+  return String(value);
+}
+
+// ─── types ───────────────────────────────────────────────────────────────────
+
 export type DecodedLogMessage =
   | SpotFillOrderReportModel
   | PerpFillOrderReportModel
@@ -31,14 +68,11 @@ export type DecodedLogMessage =
   | WithdrawReportModel
   | SpotOrderRevokeReportModel
   | PerpOrderRevokeReportModel
-  | { tag: number; [key: string]: any }; // Fallback for unknown types
+  | { tag: number; [key: string]: any };
 
 export interface PaginationOptions {
-  /** Maximum number of transactions to fetch per page */
   limit?: number;
-  /** Signature to start fetching from (for pagination) */
   before?: string;
-  /** Signature to fetch until (for pagination) */
   until?: string;
 }
 
@@ -48,6 +82,8 @@ export interface FetchResult {
   lastSignature?: string;
   totalProcessed: number;
 }
+
+// ─── class ───────────────────────────────────────────────────────────────────
 
 export class TransactionDataFetcher {
   private rpc: ReturnType<typeof createSolanaRpc>;
@@ -63,21 +99,15 @@ export class TransactionDataFetcher {
     rpcUrl: string,
     programId?: string,
     version?: number,
-    requestDelayMs: number = 300,
-    maxTransactions: number = 1000,
+    requestDelayMs = 300,
+    maxTransactions = 1000,
   ) {
     this.rpc = createSolanaRpc(devnet(rpcUrl));
     this.requestDelayMs = requestDelayMs;
     this.maxTransactions = maxTransactions;
     this.programId = process.env.PROGRAM_ID!;
-
-    if (programId) {
-      this.programId = programId;
-    }
-
-    if (version) {
-      this.version = version;
-    }
+    if (programId) this.programId = programId;
+    if (version) this.version = version;
   }
 
   private async delay(ms: number): Promise<void> {
@@ -87,73 +117,52 @@ export class TransactionDataFetcher {
   async initialize(walletPublicKey: PublicKey): Promise<void> {
     this.walletPublicKey = walletPublicKey;
 
-    // Initialize DeRiverse Engine (adapter) with programId and version
     const adapter = new EngineAdapter(this.rpc, {
       programId: this.programId as any,
       version: this.version,
     });
-    // If adapter created an underlying engine (e.g. real Engine or mocked Engine in tests), expose it
     this.engine = (adapter as any).engine ? (adapter as any).engine : adapter;
 
     try {
       await this.engine.initialize();
       await this.engine.setSigner(address(walletPublicKey.toString()));
-      // Ensure engine client data is primed during initialization (helps tests/mocks)
       try {
-        if (
-          this.engine &&
-          typeof (this.engine as any).getClientData === "function"
-        ) {
+        if (typeof (this.engine as any).getClientData === "function") {
           await (this.engine as any).getClientData();
         }
-      } catch (e) {
+      } catch (_) {
         // ignore
       }
       this.engineInitialized = true;
-
       console.log("🔍 Initialized DeRiverse Trade Data Fetcher");
       console.log(`📝 Wallet: ${walletPublicKey.toString()}`);
       console.log(`🎯 Program ID: ${this.programId}`);
       console.log(`📋 Version: ${this.version}`);
     } catch (err: any) {
       console.warn(`⚠️  Engine initialization warning: ${err.message}`);
-      console.warn(`   Continuing without full engine initialization...`);
       this.engineInitialized = false;
     }
   }
 
-  /**
-   * Fetch transactions with pagination support
-   * @param options Pagination options
-   * @returns FetchResult with trades and pagination info
-   */
-  /**
-   * Fetch transactions with pagination support
-   * @param options Pagination options
-   * @returns FetchResult with trades and pagination info
-   */
+  // ── public fetch methods ─────────────────────────────────────────────────
+
   async fetchTransactionsPaginated(
     options: PaginationOptions = {},
   ): Promise<FetchResult> {
-    if (!this.walletPublicKey) {
-      throw new Error("Wallet not initialized");
-    }
+    if (!this.walletPublicKey) throw new Error("Wallet not initialized");
 
     const limit = options.limit || 100;
-
     console.log("\n📊 Fetching transactions (paginated)...");
     console.log(`   Limit: ${limit}`);
     if (options.before) console.log(`   Before: ${options.before}`);
     if (options.until) console.log(`   Until: ${options.until}`);
 
     try {
-      // Fetch signatures with pagination
       const requestOptions: any = { limit };
       if (options.before) requestOptions.before = options.before as any;
       if (options.until) requestOptions.until = options.until as any;
 
       let signaturesResponse: any;
-
       try {
         console.log("\n🔍 Fetching signatures for wallet...");
         signaturesResponse = await this.rpc
@@ -165,131 +174,34 @@ export class TransactionDataFetcher {
       } catch (err1: any) {
         console.log("⚠️  Failed to fetch signatures");
         console.error(`  Error: ${err1.message}`);
-        return {
-          trades: [],
-          hasMore: false,
-          totalProcessed: 0,
-        };
+        return { trades: [], hasMore: false, totalProcessed: 0 };
       }
 
-      // If engine present, fetch client data early so analyzers can be primed
-      if (
-        this.engine &&
-        typeof (this.engine as any).getClientData === "function"
-      ) {
-        try {
-          await (this.engine as any).getClientData();
-        } catch (err) {
-          // ignore
-        }
-      }
+      await this.primeClientData();
 
-      // Handle both array response and { value: [] } response
       const signatures = Array.isArray(signaturesResponse)
         ? signaturesResponse
         : signaturesResponse?.value || [];
 
-      if (!signatures || signatures.length === 0) {
+      if (!signatures.length) {
         console.log("❌ No transactions found");
-        return {
-          trades: [],
-          hasMore: false,
-          totalProcessed: 0,
-        };
+        return { trades: [], hasMore: false, totalProcessed: 0 };
       }
 
       console.log(`✅ Found ${signatures.length} transactions`);
 
-      // Filter for successful transactions AND get full transaction details to check program involvement
-      const relevantSignatures = [];
-
-      console.log(
-        `\n🔍 Filtering transactions for program ID: ${this.programId}`,
-      );
-
-      for (const sigInfo of signatures) {
-        // Skip failed transactions
-        if (sigInfo.err !== null) continue;
-
-        try {
-          // Get transaction details to check if it involves our program
-          const txResponse = await this.rpc
-            .getTransaction(sigInfo.signature as Signature, {
-              maxSupportedTransactionVersion: 0,
-              encoding: "jsonParsed",
-            })
-            .send();
-
-          const tx = (txResponse as any)?.value || txResponse;
-
-          if (!tx) continue;
-
-          // Check if transaction involves our program ID
-          const involvesProgram = this.transactionInvolvesProgram(tx);
-
-          if (involvesProgram) {
-            relevantSignatures.push(sigInfo);
-            console.log(
-              `   ✅ ${sigInfo.signature.substring(0, 8)}... involves program`,
-            );
-          }
-
-          // Add small delay to avoid rate limiting
-          await this.delay(50);
-        } catch (error) {
-          console.log(
-            `   ⚠️ Failed to check ${sigInfo.signature.substring(0, 8)}...`,
-          );
-          continue;
-        }
-      }
-
+      const relevantSignatures = await this.filterProgramSignatures(signatures);
       console.log(
         `\n📊 Found ${relevantSignatures.length} program-related transactions out of ${signatures.length}`,
       );
 
-      // Ensure engine client data is refreshed before processing transactions
-      if (this.engineInitialized && this.engine) {
-        try {
-          await this.engine.getClientData();
-        } catch (err) {
-          // ignore
-        }
-      }
+      await this.primeClientData();
 
-      const allTradeRecords: TradeRecord[] = [];
-      let processedCount = 0;
+      const rawTrades = await this.processSignatures(relevantSignatures);
 
-      // Process each transaction
-      for (const sigInfo of relevantSignatures) {
-        processedCount++;
+      // ── Apply PnL calculation across all collected trades ──────────────
+      const tradesWithPnL = this.applyPnL(rawTrades);
 
-        if (processedCount % 5 === 0) {
-          console.log(
-            `   Progress: ${processedCount}/${relevantSignatures.length}`,
-          );
-        }
-
-        try {
-          const tradeRecords = await this.fetchAndParseTransaction(
-            sigInfo.signature,
-            sigInfo,
-            allTradeRecords.length,
-          );
-          allTradeRecords.push(...tradeRecords);
-
-          await this.delay(this.requestDelayMs);
-        } catch (error: any) {
-          console.warn(
-            `   ⚠️ Failed to fetch tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`,
-          );
-        }
-      }
-
-      console.log(`\n✅ Processed ${processedCount} transactions`);
-      console.log(`   Extracted trades: ${allTradeRecords.length}`);
-
-      // Determine if there are more results
       const hasMore = signatures.length > limit;
       const lastSignature =
         signatures.length > 0
@@ -297,12 +209,12 @@ export class TransactionDataFetcher {
           : undefined;
 
       return {
-        trades: allTradeRecords.sort(
+        trades: tradesWithPnL.sort(
           (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
         ),
         hasMore,
         lastSignature,
-        totalProcessed: processedCount,
+        totalProcessed: relevantSignatures.length,
       };
     } catch (error: any) {
       console.error("Error fetching transactions:", error.message);
@@ -310,58 +222,6 @@ export class TransactionDataFetcher {
     }
   }
 
-  /**
-   * Check if a transaction involves the program ID
-   */
-  private transactionInvolvesProgram(tx: any): boolean {
-    if (!tx) return false;
-
-    // Check transaction message accounts
-    if (tx.transaction?.message?.accountKeys) {
-      const accountKeys = tx.transaction.message.accountKeys;
-      for (const account of accountKeys) {
-        const accountStr =
-          typeof account === "string" ? account : account.pubkey?.toString();
-        if (accountStr === this.programId) {
-          return true;
-        }
-      }
-    }
-
-    // Check transaction instructions
-    if (tx.transaction?.message?.instructions) {
-      for (const ix of tx.transaction.message.instructions) {
-        // Check programId in instruction
-        if (ix.programId?.toString() === this.programId) {
-          return true;
-        }
-
-        // Check if it's a nested instruction (for CPI)
-        if (ix.instructions) {
-          for (const innerIx of ix.instructions) {
-            if (innerIx.programId?.toString() === this.programId) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-
-    // Check log messages for program invocation
-    if (tx.meta?.logMessages) {
-      for (const log of tx.meta.logMessages) {
-        if (log.includes(`Program ${this.programId} invoke`)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Also update the fetchAllTransactions method similarly
-   */
   async fetchAllTransactions(): Promise<TradeRecord[]> {
     if (!this.walletPublicKey) {
       console.warn("Wallet not initialized");
@@ -372,11 +232,8 @@ export class TransactionDataFetcher {
     console.log(`   Max transactions: ${this.maxTransactions}`);
 
     try {
-      // Try multiple methods to fetch signatures
       let signaturesResponse: any;
-
       try {
-        // Method 1: Try getSignaturesForAddress on the wallet
         console.log("\n🔍 Method 1: Fetching signatures for wallet...");
         signaturesResponse = await this.rpc
           .getSignaturesForAddress(address(this.walletPublicKey.toString()), {
@@ -385,7 +242,6 @@ export class TransactionDataFetcher {
           .send();
       } catch (err1: any) {
         console.log("⚠️  Method 1 failed, trying with program ID...");
-        // Method 2: Try querying by program ID
         try {
           signaturesResponse = await this.rpc
             .getSignaturesForAddress(address(this.programId), {
@@ -400,88 +256,27 @@ export class TransactionDataFetcher {
         }
       }
 
-      // Handle both array response and { value: [] } response
       const signatures = Array.isArray(signaturesResponse)
         ? signaturesResponse
         : signaturesResponse?.value || [];
 
-      if (!signatures || signatures.length === 0) {
+      if (!signatures.length) {
         console.log("❌ No transactions found");
         return [];
       }
 
       console.log(`✅ Found ${signatures.length} transactions`);
-
-      // Filter for successful transactions AND program involvement
-      const relevantSignatures = [];
-
-      console.log(
-        `\n🔍 Filtering transactions for program ID: ${this.programId}`,
-      );
-
-      for (const sigInfo of signatures) {
-        // Skip failed transactions
-        if (sigInfo.err !== null) continue;
-
-        try {
-          const txResponse = await this.rpc
-            .getTransaction(sigInfo.signature as Signature, {
-              maxSupportedTransactionVersion: 0,
-              encoding: "jsonParsed",
-            })
-            .send();
-
-          const tx = (txResponse as any)?.value || txResponse;
-
-          if (!tx) continue;
-
-          if (this.transactionInvolvesProgram(tx)) {
-            relevantSignatures.push(sigInfo);
-          }
-
-          await this.delay(50);
-        } catch (error) {
-          continue;
-        }
-      }
-
+      const relevantSignatures = await this.filterProgramSignatures(signatures);
       console.log(
         `\n📊 Processing ${relevantSignatures.length} program-related transactions...`,
       );
 
-      const allTradeRecords: TradeRecord[] = [];
-      let processedCount = 0;
+      const rawTrades = await this.processSignatures(relevantSignatures);
 
-      // Process each transaction
-      for (const sigInfo of relevantSignatures) {
-        processedCount++;
+      // ── Apply PnL calculation ──────────────────────────────────────────
+      const tradesWithPnL = this.applyPnL(rawTrades);
 
-        if (processedCount % 5 === 0) {
-          console.log(
-            `   Progress: ${processedCount}/${relevantSignatures.length}`,
-          );
-        }
-
-        try {
-          const tradeRecords = await this.fetchAndParseTransaction(
-            sigInfo.signature,
-            sigInfo,
-            allTradeRecords.length,
-          );
-          allTradeRecords.push(...tradeRecords);
-
-          await this.delay(this.requestDelayMs);
-        } catch (error: any) {
-          console.warn(
-            `   ⚠️ Failed to fetch tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`,
-          );
-        }
-      }
-
-      console.log(`\n✅ Processed ${processedCount} transactions`);
-      console.log(`   Extracted trades: ${allTradeRecords.length}`);
-
-      return allTradeRecords.sort(
+      return tradesWithPnL.sort(
         (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
       );
     } catch (error: any) {
@@ -490,51 +285,169 @@ export class TransactionDataFetcher {
     }
   }
 
+  // ── private helpers ──────────────────────────────────────────────────────
+
+  /** Run PnLCalculator over all collected trades and merge results back */
+  private applyPnL(trades: TradeRecord[]): TradeRecord[] {
+    if (!trades.length) return trades;
+    try {
+      const calc = new PnLCalculator(trades);
+      const withPnL = calc.calculatePnL();
+      // calculatePnL returns trades in the same order, with pnl/status updated
+      return withPnL.map((t) => ({
+        ...t,
+        // ensure status is always set based on pnl
+        status:
+          t.pnl > 0 ? "win" : t.pnl < 0 ? "loss" : (t.status ?? "breakeven"),
+      }));
+    } catch (err: any) {
+      console.warn(`⚠️ PnL calculation failed: ${err.message}`);
+      return trades;
+    }
+  }
+
+  private async primeClientData(): Promise<void> {
+    if (
+      this.engine &&
+      typeof (this.engine as any).getClientData === "function"
+    ) {
+      try {
+        await (this.engine as any).getClientData();
+      } catch (_) {
+        // ignore
+      }
+    }
+  }
+
+  private async filterProgramSignatures(signatures: any[]): Promise<any[]> {
+    const relevant: any[] = [];
+    console.log(
+      `\n🔍 Filtering transactions for program ID: ${this.programId}`,
+    );
+
+    for (const sigInfo of signatures) {
+      if (sigInfo.err !== null) continue;
+      try {
+        const txResponse = await this.rpc
+          .getTransaction(sigInfo.signature as Signature, {
+            maxSupportedTransactionVersion: 0,
+            encoding: "jsonParsed",
+          })
+          .send();
+        const tx = (txResponse as any)?.value ?? txResponse;
+        if (!tx) continue;
+
+        if (this.transactionInvolvesProgram(tx)) {
+          relevant.push(sigInfo);
+          console.log(
+            `   ✅ ${sigInfo.signature.substring(0, 8)}... involves program`,
+          );
+        }
+        await this.delay(50);
+      } catch (_) {
+        continue;
+      }
+    }
+    return relevant;
+  }
+
+  private async processSignatures(signatures: any[]): Promise<TradeRecord[]> {
+    const allTrades: TradeRecord[] = [];
+    let processedCount = 0;
+
+    for (const sigInfo of signatures) {
+      processedCount++;
+      if (processedCount % 5 === 0) {
+        console.log(`   Progress: ${processedCount}/${signatures.length}`);
+      }
+      try {
+        const records = await this.fetchAndParseTransaction(
+          sigInfo.signature,
+          sigInfo,
+          allTrades.length,
+        );
+        allTrades.push(...records);
+        await this.delay(this.requestDelayMs);
+      } catch (error: any) {
+        console.warn(
+          `   ⚠️ Failed to fetch tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`,
+        );
+      }
+    }
+
+    console.log(`\n✅ Processed ${processedCount} transactions`);
+    console.log(`   Extracted trades: ${allTrades.length}`);
+    return allTrades;
+  }
+
+  private transactionInvolvesProgram(tx: any): boolean {
+    if (!tx) return false;
+
+    if (tx.transaction?.message?.accountKeys) {
+      for (const account of tx.transaction.message.accountKeys) {
+        const accountStr =
+          typeof account === "string" ? account : account.pubkey?.toString();
+        if (accountStr === this.programId) return true;
+      }
+    }
+
+    if (tx.transaction?.message?.instructions) {
+      for (const ix of tx.transaction.message.instructions) {
+        if (ix.programId?.toString() === this.programId) return true;
+        if (ix.instructions) {
+          for (const innerIx of ix.instructions) {
+            if (innerIx.programId?.toString() === this.programId) return true;
+          }
+        }
+      }
+    }
+
+    if (tx.meta?.logMessages) {
+      for (const log of tx.meta.logMessages) {
+        if (log.includes(`Program ${this.programId} invoke`)) return true;
+      }
+    }
+
+    return false;
+  }
+
   /**
-   * Also update the extractInstrumentId method to be more robust
+   * Extract a small integer instrument ID from an event object.
+   *
+   * KEY FIXES vs original:
+   * 1. `crncy` is deprioritised — it can also represent a currency *amount*
+   *    (large lamport value).  We only accept it if the resolved number is
+   *    small enough to be a valid instrument/token ID (< 1_000_000).
+   * 2. Every raw value is run through `toNum()` so BN / BigInt objects do not
+   *    produce NaN or "[object Object]".
    */
   private extractInstrumentId(event: any): number | undefined {
     if (!event) return undefined;
 
-    // Priority order of field names based on Deriverse kit
-    const fieldPriority = [
-      "crncy", // Spot/Perp fills
-      "instrId", // Funding, SocLoss, other perp events
-      "tokenId", // Deposits, withdrawals
-      "instrumentId",
-      "marketId",
-      "baseCrncyId",
-    ];
-
-    for (const field of fieldPriority) {
-      if (event[field] !== undefined && event[field] !== null) {
-        let value = event[field];
-
-        // Handle different value types
-        if (typeof value === "object") {
-          if (value?.toNumber) value = value.toNumber();
-          else if (value?.toString) value = Number(value.toString());
-          else continue;
-        }
-
-        // Convert to number
-        const numValue = Number(value);
-        if (isNaN(numValue)) continue;
-
-        // Return the raw instrument ID without scaling
-        // The instrument ID itself is not scaled, only monetary values are
-        return numValue;
-      }
+    // instrId / tokenId are unambiguous instrument identifiers — try first
+    const primaryFields = ["instrId", "tokenId", "instrumentId", "marketId"];
+    for (const field of primaryFields) {
+      const raw = event[field];
+      if (raw === undefined || raw === null) continue;
+      const n = toNum(raw);
+      if (!isNaN(n)) return n;
     }
 
-    // Try to extract from raw log as fallback
+    // `crncy` / `baseCrncyId` — only accept if value looks like an ID (< 1e6)
+    const ambiguousFields = ["crncy", "baseCrncyId"];
+    for (const field of ambiguousFields) {
+      const raw = event[field];
+      if (raw === undefined || raw === null) continue;
+      const n = toNum(raw);
+      if (!isNaN(n) && n < 1_000_000) return n;
+    }
+
+    // Raw log fallback
     if (event.rawLogMessage) {
       const instrMatch = event.rawLogMessage.match(/instr[Ii]d[=:]\s*(\d+)/i);
       if (instrMatch) return parseInt(instrMatch[1], 10);
-
       const crncyMatch = event.rawLogMessage.match(/crncy[=:]\s*(\d+)/i);
       if (crncyMatch) return parseInt(crncyMatch[1], 10);
-
       const tokenMatch = event.rawLogMessage.match(/token[Ii]d[=:]\s*(\d+)/i);
       if (tokenMatch) return parseInt(tokenMatch[1], 10);
     }
@@ -542,134 +455,14 @@ export class TransactionDataFetcher {
     return undefined;
   }
 
-  /**
-   * Fetch trades for a specific instrument from spot orders
-   */
-  async fetchTradesForInstrument(instrumentId: number): Promise<TradeRecord[]> {
-    if (!this.engineInitialized || !this.engine) {
-      console.warn("⚠️ Engine not initialized, cannot fetch instrument trades");
-      return [];
-    }
-
-    try {
-      const trades: TradeRecord[] = [];
-
-      // Get client data for this instrument
-      const clientData = await this.engine.getClientData();
-      const spotData = clientData.spot?.get(instrumentId);
-
-      if (!spotData) {
-        return [];
-      }
-
-      // Get spot orders info
-      const ordersInfo = await this.engine.getClientSpotOrdersInfo({
-        instrId: instrumentId,
-        clientId: clientData.clientId,
-      });
-
-      // Get spot orders
-      const orders = await this.engine.getClientSpotOrders({
-        instrId: instrumentId,
-        bidsCount: ordersInfo.bidsCount,
-        asksCount: ordersInfo.asksCount,
-        bidsEntry: ordersInfo.bidsEntry,
-        asksEntry: ordersInfo.asksEntry,
-      });
-
-      // Process bids (buy orders)
-      if (orders.bids && Array.isArray(orders.bids)) {
-        orders.bids.forEach((bid: any, index: number) => {
-          trades.push({
-            id: `spot-bid-${instrumentId}-${index}-${Date.now()}`,
-            timestamp: new Date(),
-            section: this.formatSection(new Date()),
-            symbol: String(instrumentId),
-            instrument: String(instrumentId),
-            side: "buy",
-            entryPrice: Number(bid.price) / 1e9,
-            exitPrice: Number(bid.price) / 1e9,
-            quantity: Number(bid.qty) / 1e9,
-            amount: Number(bid.qty) / 1e9,
-            value: (Number(bid.price) * Number(bid.qty)) / 1e18,
-            orderType: bid.orderType === 1 ? "limit" : "market",
-            clientId: spotData.clientId?.toString() || "unknown",
-            orderId: bid.orderId?.toString() || "unknown",
-            transactionHash: "spot-order",
-            fees: {
-              maker: 0,
-              taker: 0,
-              total: 0,
-              rebates: 0,
-            },
-            pnl: 0,
-            pnlPercentage: 0,
-            duration: 0,
-            status: "open",
-            notes: `Spot ${bid.orderType === 1 ? "Limit" : "Market"} Buy Order`,
-            tradeType: "spot",
-            logType: "SpotOrder",
-            discriminator: 10,
-          });
-        });
-      }
-
-      // Process asks (sell orders)
-      if (orders.asks && Array.isArray(orders.asks)) {
-        orders.asks.forEach((ask: any, index: number) => {
-          trades.push({
-            id: `spot-ask-${instrumentId}-${index}-${Date.now()}`,
-            timestamp: new Date(),
-            section: this.formatSection(new Date()),
-            symbol: String(instrumentId),
-            instrument: String(instrumentId),
-            side: "sell",
-            entryPrice: Number(ask.price) / 1e9,
-            exitPrice: Number(ask.price) / 1e9,
-            quantity: Number(ask.qty) / 1e9,
-            amount: Number(ask.qty) / 1e9,
-            value: (Number(ask.price) * Number(ask.qty)) / 1e18,
-            orderType: ask.orderType === 1 ? "limit" : "market",
-            clientId: spotData.clientId?.toString() || "unknown",
-            orderId: ask.orderId?.toString() || "unknown",
-            transactionHash: "spot-order",
-            fees: {
-              maker: 0,
-              taker: 0,
-              total: 0,
-              rebates: 0,
-            },
-            pnl: 0,
-            pnlPercentage: 0,
-            duration: 0,
-            status: "open",
-            notes: `Spot ${ask.orderType === 1 ? "Limit" : "Market"} Sell Order`,
-            tradeType: "spot",
-            logType: "SpotOrder",
-            discriminator: 10,
-          });
-        });
-      }
-
-      return trades;
-    } catch (error: any) {
-      console.error(
-        `Error fetching trades for instrument ${instrumentId}:`,
-        error.message,
-      );
-      return [];
-    }
-  }
-
   private async fetchAndParseTransaction(
     signature: string,
     sigInfo: any,
-    startCounter: number,
+    _startCounter: number,
   ): Promise<TradeRecord[]> {
     const tradeRecords: TradeRecord[] = [];
 
     try {
-      // Get full transaction details
       const txResponse = await this.rpc
         .getTransaction(signature as Signature, {
           maxSupportedTransactionVersion: 0,
@@ -677,77 +470,62 @@ export class TransactionDataFetcher {
         })
         .send();
 
-      const tx = (txResponse as any)?.value || txResponse;
+      const tx = (txResponse as any)?.value ?? txResponse;
+      if (!tx) return tradeRecords;
 
-      if (!tx) {
-        return tradeRecords;
-      }
+      const logMessages: string[] = tx.meta?.logMessages ?? [];
+      if (!logMessages.length) return tradeRecords;
 
-      const logMessages = tx.meta?.logMessages || [];
-      if (logMessages.length === 0) return tradeRecords;
-
-      // Decode logs using the engine
       const decodedEvents: DecodedLogMessage[] = [];
 
       if (this.engineInitialized && this.engine) {
         try {
           const allDecoded = await (this.engine as any).logsDecode(logMessages);
-          if (
-            allDecoded &&
-            Array.isArray(allDecoded) &&
-            allDecoded.length > 0
-          ) {
+          if (Array.isArray(allDecoded) && allDecoded.length > 0) {
             decodedEvents.push(...allDecoded);
           }
-        } catch (decodeErr) {
-          // Use fallback
+        } catch (_) {
+          // ignore decode errors — no fallback raw parsing needed here
         }
       }
 
-      // Process all decoded events
+      const blockTs = sigInfo.blockTime
+        ? new Date(Number(sigInfo.blockTime) * 1000)
+        : new Date();
+
       for (const event of decodedEvents) {
         const tag = event.tag;
 
         switch (tag) {
-          case 1: // Deposit
+          // ── Deposit ───────────────────────────────────────────────────
           case LogType.deposit: {
             const deposit = event as DepositReportModel;
-            const tokenSymbol = this.getTokenSymbol(deposit.tokenId);
-            const amount = Number(deposit.amount) / 1e9; // Scale down
+            const tokenId = toNum(deposit.tokenId);
+            const tokenSymbol = this.getTokenSymbol(tokenId);
+            const amount = toNum(deposit.amount) / 1e9;
 
             tradeRecords.push({
-              id: `deposit-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
-              timestamp: sigInfo.blockTime
-                ? new Date(Number(sigInfo.blockTime) * 1000)
-                : new Date(),
-              section: this.formatSection(
-                sigInfo.blockTime
-                  ? new Date(Number(sigInfo.blockTime) * 1000)
-                  : new Date(),
-              ),
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
               symbol: tokenSymbol,
               side: "buy",
               instrument: `${tokenSymbol}/USD`,
               entryPrice: 0,
               exitPrice: 0,
               quantity: amount,
-              amount: amount,
+              amount,
               value: 0,
               orderType: "deposit",
-              clientId: deposit.clientId?.toString() || "unknown",
+              clientId: toStr(deposit.clientId) || "unknown",
               orderId: "N/A",
               transactionHash: signature,
-              fees: {
-                maker: 0,
-                taker: 0,
-                total: 0,
-                rebates: 0,
-              },
+              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
               pnl: 0,
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Deposit ${amount} ${tokenSymbol}`,
+              notes: `Deposit ${amount.toFixed(6)} ${tokenSymbol}`,
               tradeType: "spot",
               logType: "deposit",
               discriminator: tag,
@@ -755,47 +533,73 @@ export class TransactionDataFetcher {
             break;
           }
 
-          case 3: // Perp Deposit
-          case LogType.perpDeposit: {
-            const perpDeposit = event as any;
-            const instrumentSymbol = this.getInstrumentSymbol(
-              perpDeposit.instrId,
-            );
-            const amount = Number(perpDeposit.amount) / 1e9;
+          // ── Withdraw ──────────────────────────────────────────────────
+          case LogType.withdraw: {
+            const withdraw = event as WithdrawReportModel;
+            const tokenId = toNum(withdraw.tokenId);
+            const tokenSymbol = this.getTokenSymbol(tokenId);
+            const amount = toNum(withdraw.amount) / 1e9;
 
             tradeRecords.push({
-              id: `perp-deposit-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
-              timestamp: sigInfo.blockTime
-                ? new Date(Number(sigInfo.blockTime) * 1000)
-                : new Date(),
-              section: this.formatSection(
-                sigInfo.blockTime
-                  ? new Date(Number(sigInfo.blockTime) * 1000)
-                  : new Date(),
-              ),
-              symbol: instrumentSymbol,
-              side: "buy",
-              instrument: instrumentSymbol,
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol: tokenSymbol,
+              side: "sell",
+              instrument: `${tokenSymbol}/USD`,
               entryPrice: 0,
               exitPrice: 0,
               quantity: amount,
-              amount: amount,
+              amount,
               value: 0,
-              orderType: "deposit",
-              clientId: perpDeposit.clientId?.toString() || "unknown",
+              orderType: "withdraw",
+              clientId: toStr(withdraw.clientId) || "unknown",
               orderId: "N/A",
               transactionHash: signature,
-              fees: {
-                maker: 0,
-                taker: 0,
-                total: 0,
-                rebates: 0,
-              },
+              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
               pnl: 0,
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Perp Deposit ${amount} to ${instrumentSymbol}`,
+              notes: `Withdraw ${amount.toFixed(6)} ${tokenSymbol}`,
+              tradeType: "spot",
+              logType: "withdraw",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          // ── Perp Deposit ──────────────────────────────────────────────
+          case LogType.perpDeposit: {
+            const perpDeposit = event as any;
+            const instrId = toNum(perpDeposit.instrId);
+            const instrumentSymbol = this.getInstrumentSymbol(instrId);
+            const amount = toNum(perpDeposit.amount) / 1e9;
+            const perpDetails = await this.resolveInstrumentDetails(instrId);
+            const symbol = perpDetails.symbol || instrumentSymbol;
+
+            tradeRecords.push({
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol,
+              side: "buy",
+              instrument: symbol,
+              entryPrice: 0,
+              exitPrice: 0,
+              quantity: amount,
+              amount,
+              value: 0,
+              orderType: "deposit",
+              clientId: toStr(perpDeposit.clientId) || "unknown",
+              orderId: "N/A",
+              transactionHash: signature,
+              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
+              pnl: 0,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "breakeven",
+              notes: `Perp Deposit ${amount.toFixed(6)} to ${symbol}`,
               tradeType: "perp",
               logType: "perpDeposit",
               discriminator: tag,
@@ -803,49 +607,39 @@ export class TransactionDataFetcher {
             break;
           }
 
-          case 10: // Spot Place Order
+          // ── Spot Place Order ──────────────────────────────────────────
           case LogType.spotPlaceOrder: {
             const placeOrder = event as any;
-            const instrumentSymbol = this.getInstrumentSymbol(
-              placeOrder.instrId,
-            );
+            const instrId = toNum(placeOrder.instrId);
+            const instrumentSymbol = this.getInstrumentSymbol(instrId);
+            const details = await this.resolveInstrumentDetails(instrId);
+            const symbol = details.symbol || instrumentSymbol;
             const side = placeOrder.side === 0 ? "buy" : "sell";
-            const quantity = Number(placeOrder.qty) / 1e9;
-            const price = placeOrder.price; // Already scaled by engine
+            const quantity = toNum(placeOrder.qty) / 1e9;
+            const price = toNum(placeOrder.price);
 
             tradeRecords.push({
-              id: `place-order-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
-              timestamp: sigInfo.blockTime
-                ? new Date(Number(sigInfo.blockTime) * 1000)
-                : new Date(),
-              section: this.formatSection(
-                sigInfo.blockTime
-                  ? new Date(Number(sigInfo.blockTime) * 1000)
-                  : new Date(),
-              ),
-              symbol: instrumentSymbol,
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol,
               side: side as "buy" | "sell",
-              instrument: instrumentSymbol,
+              instrument: symbol,
               entryPrice: price,
               exitPrice: price,
-              quantity: quantity,
+              quantity,
               amount: quantity,
               value: price * quantity,
               orderType: placeOrder.orderType === 1 ? "limit" : "market",
-              clientId: placeOrder.clientId?.toString() || "unknown",
-              orderId: placeOrder.orderId?.toString() || "unknown",
+              clientId: toStr(placeOrder.clientId) || "unknown",
+              orderId: toStr(placeOrder.orderId) || "unknown",
               transactionHash: signature,
-              fees: {
-                maker: 0,
-                taker: 0,
-                total: 0,
-                rebates: 0,
-              },
+              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
               pnl: 0,
               pnlPercentage: 0,
               duration: 0,
               status: "open",
-              notes: `Place ${side === "buy" ? "Buy" : "Sell"} Order for ${quantity} ${instrumentSymbol} @ ${price}`,
+              notes: `Place ${side === "buy" ? "Buy" : "Sell"} Order for ${quantity} ${symbol} @ ${price}`,
               tradeType: "spot",
               logType: "spotPlaceOrder",
               discriminator: tag,
@@ -853,48 +647,51 @@ export class TransactionDataFetcher {
             break;
           }
 
-          case 11: // Spot Fill (Trade)
+          // ── Spot Fill (Trade) — discriminator 11 ─────────────────────
           case LogType.spotFillOrder: {
             const fill = event as SpotFillOrderReportModel;
-            const instrumentSymbol = this.getInstrumentSymbol(fill.crncy);
+            // instrId is the canonical instrument ID; crncy here is the USDC amount
+            const instrId =
+              this.extractInstrumentId(fill) ??
+              (() => {
+                // last-resort: use crncy only if it looks like an ID
+                const c = toNum((fill as any).crncy);
+                return c < 1_000_000 ? c : 0;
+              })();
+            const instrumentSymbol = this.getInstrumentSymbol(instrId);
+            const details = await this.resolveInstrumentDetails(instrId);
+            const symbol = details.symbol || instrumentSymbol;
+
             const side = fill.side === 0 ? "buy" : "sell";
-            const quantity = Number(fill.qty) / 1e9;
-            const price = fill.price; // Already scaled by engine
-            const rebates = fill.rebates ? -Number(fill.rebates) / 1e9 : 0;
+            const quantity = toNum(fill.qty) / 1e9;
+            // price is already human-readable (engine scales it)
+            const price = toNum(fill.price);
+            // crncy here = USDC value of the fill
+            const value = toNum((fill as any).crncy) / 1e9;
+            const rebates = fill.rebates ? -(toNum(fill.rebates) / 1e9) : 0;
 
             tradeRecords.push({
-              id: `trade-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
-              timestamp: sigInfo.blockTime
-                ? new Date(Number(sigInfo.blockTime) * 1000)
-                : new Date(),
-              section: this.formatSection(
-                sigInfo.blockTime
-                  ? new Date(Number(sigInfo.blockTime) * 1000)
-                  : new Date(),
-              ),
-              symbol: instrumentSymbol,
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol,
               side: side as "buy" | "sell",
-              instrument: instrumentSymbol,
+              instrument: symbol,
               entryPrice: price,
               exitPrice: price,
-              quantity: quantity,
+              quantity,
               amount: quantity,
-              value: price * quantity,
+              value: value || price * quantity,
               orderType: "market",
-              clientId: fill.clientId?.toString() || "unknown",
-              orderId: fill.orderId?.toString() || "unknown",
+              clientId: toStr(fill.clientId) || "unknown",
+              orderId: toStr(fill.orderId) || "unknown",
               transactionHash: signature,
-              fees: {
-                maker: 0,
-                taker: 0,
-                total: rebates,
-                rebates: rebates,
-              },
-              pnl: 0,
+              fees: { maker: 0, taker: 0, total: rebates, rebates },
+              pnl: 0, // computed by PnLCalculator after collection
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `${side === "buy" ? "Bought" : "Sold"} ${quantity} ${instrumentSymbol} @ ${price}`,
+              notes: `${side === "buy" ? "Bought" : "Sold"} ${quantity.toFixed(6)} ${symbol} @ ${price}`,
               tradeType: "spot",
               logType: "spotFillOrder",
               discriminator: tag,
@@ -902,41 +699,36 @@ export class TransactionDataFetcher {
             break;
           }
 
-          case 12: // Spot New Order
+          // ── Spot New Order ────────────────────────────────────────────
           case LogType.spotNewOrder: {
             const newOrder = event as any;
+            const instrId = this.extractInstrumentId(newOrder);
+            const details = instrId
+              ? await this.resolveInstrumentDetails(instrId)
+              : undefined;
+            const symbol = details?.symbol || "SOL/USDC";
             const side = newOrder.side === 0 ? "buy" : "sell";
-            const quantity = Number(newOrder.qty) / 1e9;
-            const crncy = Number(newOrder.crncy) / 1e9;
+            const quantity = toNum(newOrder.qty) / 1e9;
+            const crncyValue = toNum(newOrder.crncy) / 1e9;
+            const price = quantity > 0 ? crncyValue / quantity : 0;
 
             tradeRecords.push({
-              id: `new-order-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
-              timestamp: sigInfo.blockTime
-                ? new Date(Number(sigInfo.blockTime) * 1000)
-                : new Date(),
-              section: this.formatSection(
-                sigInfo.blockTime
-                  ? new Date(Number(sigInfo.blockTime) * 1000)
-                  : new Date(),
-              ),
-              symbol: "SOL/USDC", // You might want to derive this from context
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol,
               side: side as "buy" | "sell",
-              instrument: "SOL/USDC",
-              entryPrice: crncy / quantity,
-              exitPrice: crncy / quantity,
-              quantity: quantity,
+              instrument: symbol,
+              entryPrice: price,
+              exitPrice: price,
+              quantity,
               amount: quantity,
-              value: crncy,
+              value: crncyValue,
               orderType: "new",
               clientId: "unknown",
               orderId: "unknown",
               transactionHash: signature,
-              fees: {
-                maker: 0,
-                taker: 0,
-                total: 0,
-                rebates: 0,
-              },
+              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
               pnl: 0,
               pnlPercentage: 0,
               duration: 0,
@@ -949,22 +741,16 @@ export class TransactionDataFetcher {
             break;
           }
 
-          case 15: // Spot Fees
+          // ── Spot Fees ─────────────────────────────────────────────────
           case LogType.spotFees: {
             const fees = event as SpotFeesReportModel;
-            const feeAmount = Number(fees.fees) / 1e9;
-            const refPayment = Number(fees.refPayment) / 1e9;
+            const feeAmount = toNum(fees.fees) / 1e9;
+            const refPayment = toNum(fees.refPayment) / 1e9;
 
             tradeRecords.push({
-              id: `fees-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
-              timestamp: sigInfo.blockTime
-                ? new Date(Number(sigInfo.blockTime) * 1000)
-                : new Date(),
-              section: this.formatSection(
-                sigInfo.blockTime
-                  ? new Date(Number(sigInfo.blockTime) * 1000)
-                  : new Date(),
-              ),
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
               symbol: "USDC",
               side: "sell",
               instrument: "Fees",
@@ -974,7 +760,7 @@ export class TransactionDataFetcher {
               amount: feeAmount,
               value: feeAmount,
               orderType: "fee",
-              clientId: fees.refClientId?.toString() || "unknown",
+              clientId: toStr(fees.refClientId) || "unknown",
               orderId: "N/A",
               transactionHash: signature,
               fees: {
@@ -986,14 +772,223 @@ export class TransactionDataFetcher {
               pnl: -feeAmount,
               pnlPercentage: 0,
               duration: 0,
-              status: "loss",
-              notes: `Trading Fees: ${feeAmount} USDC, Ref Payment: ${refPayment}`,
+              status: feeAmount > 0 ? "loss" : "breakeven",
+              notes: `Trading Fees: ${feeAmount.toFixed(6)} USDC, Ref Payment: ${refPayment.toFixed(6)}`,
               tradeType: "spot",
               logType: "spotFees",
               discriminator: tag,
             });
             break;
           }
+
+          // ── Perp Fill — discriminator 19 ──────────────────────────────
+          case LogType.perpFillOrder: {
+            const perpFill = event as PerpFillOrderReportModel;
+            const instrId =
+              this.extractInstrumentId(perpFill) ??
+              toNum((perpFill as any).instrId);
+            const details = await this.resolveInstrumentDetails(instrId);
+            const symbol =
+              details.symbol ||
+              (instrId !== undefined ? `PERP-${instrId}` : "PERP-UNKNOWN");
+
+            const isLong = perpFill.side === 0;
+            const quantity = toNum(perpFill.perps) / 1e9;
+            const price = toNum(perpFill.price);
+            const crncyValue = toNum((perpFill as any).crncy) / 1e9;
+            const rebates = perpFill.rebates
+              ? -(toNum(perpFill.rebates) / 1e9)
+              : 0;
+
+            tradeRecords.push({
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol,
+              side: isLong ? "long" : "short",
+              instrument: symbol,
+              entryPrice: price,
+              exitPrice: price,
+              quantity,
+              amount: quantity,
+              value: crncyValue || price * quantity,
+              orderType: "market",
+              clientId: toStr(perpFill.clientId) || "unknown",
+              orderId: toStr(perpFill.orderId) || "unknown",
+              transactionHash: signature,
+              fees: { maker: 0, taker: 0, total: rebates, rebates },
+              pnl: 0,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "breakeven",
+              notes: `Perp ${isLong ? "Long" : "Short"} Fill — ${quantity.toFixed(6)} ${symbol} @ ${price}`,
+              tradeType: "perp",
+              logType: "perpFillOrder",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          // ── Perp Funding ──────────────────────────────────────────────
+          case LogType.perpFunding: {
+            const funding = event as PerpFundingReportModel;
+            const instrId =
+              this.extractInstrumentId(funding) ?? toNum(funding.instrId);
+            const details = await this.resolveInstrumentDetails(instrId);
+            const symbol = details.symbol || `PERP-${instrId}`;
+            const fundingValue = toNum(funding.funding) / 1e9;
+
+            tradeRecords.push({
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol,
+              side: fundingValue >= 0 ? "long" : "short",
+              instrument: symbol,
+              entryPrice: 0,
+              exitPrice: 0,
+              quantity: 0,
+              amount: Math.abs(fundingValue),
+              value: Math.abs(fundingValue),
+              orderType: "funding",
+              clientId: toStr(funding.clientId) || "unknown",
+              orderId: "N/A",
+              transactionHash: signature,
+              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
+              pnl: fundingValue,
+              pnlPercentage: 0,
+              duration: 0,
+              status: fundingValue > 0 ? "win" : "loss",
+              notes: `${fundingValue > 0 ? "Received" : "Paid"} Funding: ${Math.abs(fundingValue).toFixed(6)} USDC`,
+              tradeType: "perp",
+              fundingPayments: fundingValue,
+              logType: "perpFunding",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          // ── Perp Fees ─────────────────────────────────────────────────
+          case LogType.perpFees: {
+            const perpFees = event as PerpFeesReportModel;
+            const feeAmount = toNum((perpFees as any).fees) / 1e9;
+
+            tradeRecords.push({
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol: "USDC",
+              side: "sell",
+              instrument: "Perp Fees",
+              entryPrice: 0,
+              exitPrice: 0,
+              quantity: feeAmount,
+              amount: feeAmount,
+              value: feeAmount,
+              orderType: "fee",
+              clientId: toStr((perpFees as any).clientId) || "unknown",
+              orderId: "N/A",
+              transactionHash: signature,
+              fees: { maker: 0, taker: 0, total: feeAmount, rebates: 0 },
+              pnl: -feeAmount,
+              pnlPercentage: 0,
+              duration: 0,
+              status: feeAmount > 0 ? "loss" : "breakeven",
+              notes: `Perp Trading Fees: ${feeAmount.toFixed(6)} USDC`,
+              tradeType: "perp",
+              logType: "perpFees",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          // ── Perp Socialized Loss ──────────────────────────────────────
+          case LogType.perpSocLoss: {
+            const socLoss = event as PerpSocLossReportModel;
+            const instrId = toNum(socLoss.instrId);
+            const details = await this.resolveInstrumentDetails(instrId);
+            const symbol = details.symbol || `PERP-${instrId}`;
+            const lossValue = toNum(socLoss.socLoss) / 1e9;
+
+            tradeRecords.push({
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol,
+              side: "short",
+              instrument: symbol,
+              entryPrice: 0,
+              exitPrice: 0,
+              quantity: 0,
+              amount: Math.abs(lossValue),
+              value: Math.abs(lossValue),
+              orderType: "socLoss",
+              clientId: toStr(socLoss.clientId) || "unknown",
+              orderId: "N/A",
+              transactionHash: signature,
+              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
+              pnl: -lossValue,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "loss",
+              notes: `Socialized Loss: ${lossValue.toFixed(6)} USDC`,
+              tradeType: "perp",
+              socializedLoss: lossValue,
+              logType: "perpSocLoss",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          // ── Spot / Perp Order Revoke ──────────────────────────────────
+          case LogType.spotOrderRevoke:
+          case LogType.perpOrderRevoke: {
+            const revoke = event as SpotOrderRevokeReportModel;
+            const isPerp = tag === LogType.perpOrderRevoke;
+            const instrId =
+              this.extractInstrumentId(event) ?? toNum((event as any).instrId);
+            const details = await this.resolveInstrumentDetails(instrId);
+            const symbol =
+              details.symbol ||
+              (instrId !== undefined
+                ? isPerp
+                  ? `PERP-${instrId}`
+                  : this.getInstrumentSymbol(instrId)
+                : "UNKNOWN");
+            const quantity = toNum(revoke.qty) / 1e9;
+            const price = toNum((revoke as any).price);
+
+            tradeRecords.push({
+              id: signature,
+              timestamp: blockTs,
+              section: this.formatSection(blockTs),
+              symbol,
+              side: "sell",
+              instrument: symbol,
+              entryPrice: price,
+              exitPrice: price,
+              quantity,
+              amount: quantity,
+              value: quantity * price,
+              orderType: "revoke",
+              clientId: toStr(revoke.clientId) || "unknown",
+              orderId: toStr(revoke.orderId) || "unknown",
+              transactionHash: signature,
+              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
+              pnl: 0,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "breakeven",
+              notes: `${isPerp ? "Perp" : "Spot"} Order Revoked`,
+              tradeType: isPerp ? "perp" : "spot",
+              logType: isPerp ? "perpOrderRevoke" : "spotOrderRevoke",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          default:
+            break;
         }
       }
 
@@ -1006,7 +1001,8 @@ export class TransactionDataFetcher {
     }
   }
 
-  // Add these helper methods to your class
+  // ── instrument / token lookups ───────────────────────────────────────────
+
   private getTokenSymbol(tokenId: number): string {
     const tokenMap: Record<number, string> = {
       1: "USDC",
@@ -1026,7 +1022,7 @@ export class TransactionDataFetcher {
       28: "TST",
       30: "asd",
     };
-    return tokenMap[tokenId] || `TOKEN-${tokenId}`;
+    return tokenMap[tokenId] ?? `TOKEN-${tokenId}`;
   }
 
   private getInstrumentSymbol(instrId: number): string {
@@ -1047,393 +1043,112 @@ export class TransactionDataFetcher {
       26: "TST/USDC",
       28: "asd/USDC",
     };
-    return instrumentMap[instrId] || `INSTR-${instrId}`;
+    return instrumentMap[instrId] ?? `INSTR-${instrId}`;
   }
 
-  private parseRawLog(
-    log: string,
-    signature: string,
-    sigInfo: any,
-    counter: number,
-  ): TradeRecord | null {
-    const lowerLog = log.toLowerCase();
-    const timestamp = sigInfo.blockTime
-      ? new Date(Number(sigInfo.blockTime) * 1000)
-      : new Date();
+  /** Resolve a human-readable symbol via engine instrument/token metadata. */
+  async resolveInstrumentDetails(instrId?: number): Promise<{
+    symbol: string;
+    base: string;
+    quote: string;
+  }> {
+    // Safe fallback — never returns "INSTR-undefined"
+    const fallbackSymbol =
+      instrId !== undefined && instrId !== null && !isNaN(instrId)
+        ? this.getInstrumentSymbol(instrId)
+        : "UNKNOWN";
 
-    // Attempt to extract side from explicit numeric field like `side: 0` or by keywords
-    let side: string = "unknown";
-    const sideMatch = lowerLog.match(/side\s*[:=]\s*(\d+)/i);
-    if (sideMatch) {
-      const sideNum = Number(sideMatch[1]);
-      side = sideNum === 0 ? "buy" : sideNum === 1 ? "sell" : "unknown";
-    } else {
-      side =
-        lowerLog.includes("buy") || lowerLog.includes("long")
-          ? "buy"
-          : lowerLog.includes("sell") || lowerLog.includes("short")
-            ? "sell"
-            : "unknown";
+    const result = {
+      symbol: fallbackSymbol,
+      base: "UNKNOWN",
+      quote: "UNKNOWN",
+    };
+
+    if (instrId === undefined || instrId === null || isNaN(instrId)) {
+      return result;
     }
 
-    const priceMatch = log.match(/price[=:]\s*([\d.]+)/i);
-    const sizeMatch =
-      log.match(/size[=:]\s*([\d.]+)/i) || log.match(/qty[=:]\s*([\d.]+)/i);
-    const feeMatch = log.match(/fee[=:]\s*([\d.]+)/i);
-    const amountMatch = log.match(/amount[=:]\s*([\d.]+)/i);
+    try {
+      if (
+        this.engine?.instruments &&
+        typeof this.engine.instruments.get === "function"
+      ) {
+        const meta = this.engine.instruments.get(instrId as any);
+        if (meta?.header) {
+          const header = meta.header as any;
 
-    // Try to extract instrument ID
-    const instrMatch = log.match(/instrId[=:]\s*(\d+)/i);
-    const symbol = instrMatch ? parseInt(instrMatch[1]).toString() : "UNKNOWN";
-    const instrument = instrMatch
-      ? parseInt(instrMatch[1]).toString()
-      : "UNKNOWN";
+          if (header.assetMint && header.crncyMint) {
+            const baseMint = header.assetMint;
+            const quoteMint = header.crncyMint;
+            let base = "UNKNOWN";
+            let quote = "UNKNOWN";
 
-    const quantity = sizeMatch
-      ? parseFloat(sizeMatch[1])
-      : amountMatch
-        ? parseFloat(amountMatch[1])
-        : 0;
+            if (this.engine.tokens instanceof Map) {
+              const baseToken = this.engine.tokens.get(baseMint);
+              const quoteToken = this.engine.tokens.get(quoteMint);
+              if (typeof baseToken === "string") base = baseToken;
+              else if (baseToken && typeof baseToken === "object") base = (baseToken.symbol as string) || base;
+              if (typeof quoteToken === "string") quote = quoteToken;
+              else if (quoteToken && typeof quoteToken === "object") quote = (quoteToken.symbol as string) || quote;
+            }
 
-    // Scale down if it looks like a large number (likely in lamports/1e9)
-    const scaledQuantity = quantity > 1e9 ? quantity / 1e9 : quantity;
-    const scaledPrice =
-      priceMatch && parseFloat(priceMatch[1]) > 1e9
-        ? parseFloat(priceMatch[1]) / 1e9
-        : priceMatch
-          ? parseFloat(priceMatch[1])
-          : 0;
+            if (base === "UNKNOWN" || quote === "UNKNOWN") {
+              try {
+                const {
+                  TokenListProvider,
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                } = require("@solana/spl-token-registry");
+                const list = await new TokenListProvider().resolve();
+                const tokens = list.getList();
+                const baseEntry = tokens.find(
+                  (t: any) => t.address === baseMint,
+                );
+                const quoteEntry = tokens.find(
+                  (t: any) => t.address === quoteMint,
+                );
+                if (baseEntry) base = baseEntry.symbol;
+                if (quoteEntry) quote = quoteEntry.symbol;
+              } catch (_) {
+                // ignore
+              }
+            }
 
-    return {
-      id: `raw-${counter}-${signature.substring(0, 8)}`,
-      timestamp,
-      section: this.formatSection(timestamp),
-      symbol,
-      side: side as "buy" | "sell",
-      entryPrice: scaledPrice,
-      exitPrice: scaledPrice,
-      quantity: scaledQuantity,
-      amount: scaledQuantity,
-      value: scaledPrice * scaledQuantity,
-      orderType: "unknown",
-      instrument,
-      clientId: "unknown",
-      orderId: "unknown",
-      transactionHash: signature,
-      fees: {
-        maker: 0,
-        taker: 0,
-        total: feeMatch ? parseFloat(feeMatch[1]) : 0,
-        rebates: 0,
-      },
-      pnl: 0,
-      pnlPercentage: 0,
-      duration: 0,
-      status: "breakeven",
-      notes: "Parsed from raw log",
-      tradeType: lowerLog.includes("perp") ? "perp" : "spot",
-      rawLogMessage: log,
-    };
-  }
+            if (base !== "UNKNOWN" || quote !== "UNKNOWN") {
+              return {
+                symbol: `${base}/${quote}`,
+                base,
+                quote,
+              };
+            }
+          }
 
-  private parseDecodedLog(
-    log: DecodedLogMessage,
-    signature: string,
-    blockTime: number | null,
-    counter: number,
-  ): TradeRecord | null {
-    const timestamp = blockTime ? new Date(blockTime * 1000) : new Date();
-    const tag = log.tag;
+          if (
+            header.assetTokenId !== undefined &&
+            header.crncyTokenId !== undefined
+          ) {
+            const baseRaw = this.engine.tokens?.get(header.assetTokenId) || this.getTokenSymbol(toNum(header.assetTokenId));
+            const quoteRaw = this.engine.tokens?.get(header.crncyTokenId) || this.getTokenSymbol(toNum(header.crncyTokenId));
 
-    // Get log type name safely
-    let logTypeName = "Unknown";
-    for (const key in LogType) {
-      if (typeof key === "string" && !key.match(/^\d/)) {
-        const value = (LogType as any)[key];
-        if (value === tag) {
-          logTypeName = key;
-          break;
+            // normalize to string symbol if token entries are objects
+            const base = typeof baseRaw === "string" ? baseRaw : baseRaw?.symbol ?? String(baseRaw);
+            const quote = typeof quoteRaw === "string" ? quoteRaw : quoteRaw?.symbol ?? String(quoteRaw);
+
+            return {
+              symbol: `${base}/${quote}`,
+              base: String(base),
+              quote: String(quote),
+            };
+          }
         }
       }
+    } catch (_) {
+      // ignore — return fallback
     }
 
-    // Check if this is a trade event (using numeric comparison)
-    const isTradeEvent =
-      tag === 11 ||
-      tag === 19 ||
-      tag === LogType.spotFillOrder ||
-      tag === LogType.perpFillOrder ||
-      (log as any).price !== undefined ||
-      (log as any).qty !== undefined ||
-      (log as any).perps !== undefined;
-
-    if (!isTradeEvent) {
-      return null;
-    }
-
-    const section = this.formatSection(timestamp);
-
-    // Scale values
-    const scaleValue = (value: any): number => {
-      if (!value) return 0;
-      const num = Number(value);
-      return num > 1e9 ? num / 1e9 : num;
-    };
-
-    // Handle different event types by their numeric tag
-    switch (tag) {
-      case 11: // Spot fill
-      case LogType.spotFillOrder: {
-        const spotFill = log as SpotFillOrderReportModel;
-        const isBuy = spotFill.side === 0;
-        const quantity = scaleValue(spotFill.qty || 0);
-        const price = scaleValue(spotFill.price || 0);
-        const value = scaleValue(spotFill.crncy || 0);
-        const rebates = spotFill.rebates ? -Number(spotFill.rebates) / 1e9 : 0;
-
-        const instrumentId =
-          this.extractInstrumentId(spotFill) ?? spotFill.crncy;
-
-        return {
-          id: `spot-fill-${counter}-${signature.substring(0, 8)}`,
-          timestamp,
-          section,
-          symbol: String(instrumentId),
-          instrument: String(instrumentId),
-          side: isBuy ? "buy" : "sell",
-          entryPrice: price,
-          exitPrice: price,
-          quantity,
-          amount: quantity,
-          value: value || price * quantity,
-          orderType: "market",
-          clientId: spotFill.clientId?.toString() || "unknown",
-          orderId: spotFill.orderId?.toString() || "unknown",
-          transactionHash: signature,
-          fees: {
-            maker: 0,
-            taker: 0,
-            total: rebates,
-            rebates: rebates,
-          },
-          pnl: 0,
-          pnlPercentage: 0,
-          duration: 0,
-          status: "breakeven",
-          notes: `Spot ${isBuy ? "Buy" : "Sell"} Fill`,
-          tradeType: "spot",
-          logType: logTypeName,
-          discriminator: tag,
-        };
-      }
-
-      case 19: // Perp fill
-      case LogType.perpFillOrder: {
-        const perpFill = log as PerpFillOrderReportModel;
-        const isLong = perpFill.side === 0;
-        const quantity = scaleValue(perpFill.perps || 0);
-        const price = scaleValue(perpFill.price || 0);
-        const value = scaleValue(perpFill.crncy || 0);
-        const rebates = perpFill.rebates ? -Number(perpFill.rebates) / 1e9 : 0;
-
-        const instrumentId =
-          this.extractInstrumentId(perpFill) ?? perpFill.crncy;
-        return {
-          id: `perp-fill-${counter}-${signature.substring(0, 8)}`,
-          timestamp,
-          section,
-          symbol: instrumentId.toString(),
-          instrument: instrumentId.toString(),
-          side: isLong ? "long" : "short",
-          entryPrice: price,
-          exitPrice: price,
-          quantity,
-          amount: quantity,
-          value: value || price * quantity,
-          orderType: "market",
-          clientId: perpFill.clientId?.toString() || "unknown",
-          orderId: perpFill.orderId?.toString() || "unknown",
-          transactionHash: signature,
-          fees: {
-            maker: 0,
-            taker: 0,
-            total: rebates,
-            rebates: rebates,
-          },
-          pnl: 0,
-          pnlPercentage: 0,
-          duration: 0,
-          status: "breakeven",
-          notes: `Perp ${isLong ? "Long" : "Short"} Fill`,
-          tradeType: "perp",
-          logType: logTypeName,
-          discriminator: tag,
-        };
-      }
-
-      case LogType.perpFunding: {
-        const funding = log as PerpFundingReportModel;
-        const isReceived = funding.funding > 0;
-        const fundingValue = scaleValue(funding.funding || 0);
-
-        const instrumentId =
-          this.extractInstrumentId(funding) ?? funding.instrId;
-
-        return {
-          id: `funding-${counter}-${signature.substring(0, 8)}`,
-          timestamp,
-          section,
-          symbol: instrumentId.toString(),
-          instrument: instrumentId.toString(),
-          side: isReceived ? "long" : "short",
-          entryPrice: 0,
-          exitPrice: 0,
-          quantity: 0,
-          amount: Math.abs(fundingValue),
-          value: Math.abs(fundingValue),
-          orderType: "unknown",
-          clientId: funding.clientId?.toString() || "unknown",
-          orderId: "N/A",
-          transactionHash: signature,
-          fees: {
-            maker: 0,
-            taker: 0,
-            total: 0,
-            rebates: 0,
-          },
-          pnl: fundingValue,
-          pnlPercentage: 0,
-          duration: 0,
-          status: fundingValue > 0 ? "win" : "loss",
-          notes: `${fundingValue > 0 ? "Received" : "Paid"} Funding`,
-          tradeType: "perp",
-          fundingPayments: fundingValue,
-          logType: logTypeName,
-          discriminator: tag,
-        };
-      }
-
-      case LogType.perpSocLoss: {
-        const socLoss = log as PerpSocLossReportModel;
-        const lossValue = scaleValue(socLoss.socLoss || 0);
-
-        return {
-          id: `socloss-${counter}-${signature.substring(0, 8)}`,
-          timestamp,
-          section,
-          symbol: socLoss.instrId?.toString(),
-          side: "short",
-          entryPrice: 0,
-          exitPrice: 0,
-          quantity: 0,
-          amount: Math.abs(lossValue),
-          value: Math.abs(lossValue),
-          orderType: "unknown",
-          instrument: socLoss.instrId?.toString(),
-          clientId: socLoss.clientId?.toString() || "unknown",
-          orderId: "N/A",
-          transactionHash: signature,
-          fees: {
-            maker: 0,
-            taker: 0,
-            total: 0,
-            rebates: 0,
-          },
-          pnl: -lossValue,
-          pnlPercentage: 0,
-          duration: 0,
-          status: "loss",
-          notes: "Socialized Loss",
-          tradeType: "perp",
-          socializedLoss: lossValue,
-          logType: logTypeName,
-          discriminator: tag,
-        };
-      }
-
-      case LogType.spotOrderRevoke:
-      case LogType.perpOrderRevoke: {
-        const revoke = log as SpotOrderRevokeReportModel;
-        const isPerp = tag === LogType.perpOrderRevoke;
-        const quantity = scaleValue(revoke.qty || 0);
-        const price = scaleValue((revoke as any).price || 0);
-
-        return {
-          id: `order-revoke-${counter}-${signature.substring(0, 8)}`,
-          timestamp,
-          section,
-          symbol: (log as any)?.instrId,
-          side: "sell",
-          entryPrice: price,
-          exitPrice: price,
-          quantity,
-          amount: quantity,
-          value: quantity * price,
-          orderType: "revoke",
-          instrument: (log as any).instrId,
-          clientId: revoke.clientId?.toString() || "unknown",
-          orderId: revoke.orderId?.toString() || "unknown",
-          transactionHash: signature,
-          fees: {
-            maker: 0,
-            taker: 0,
-            total: 0,
-            rebates: 0,
-          },
-          pnl: 0,
-          pnlPercentage: 0,
-          duration: 0,
-          status: "breakeven",
-          notes: `${isPerp ? "Perp" : "Spot"} Order Revoke`,
-          tradeType: isPerp ? "perp" : "spot",
-          logType: logTypeName,
-          discriminator: tag,
-        };
-      }
-
-      case LogType.deposit:
-      case LogType.withdraw: {
-        const depositWithdraw = log as DepositReportModel | WithdrawReportModel;
-        const isDeposit = tag === LogType.deposit;
-        const amount = scaleValue(depositWithdraw.amount || 0);
-
-        return {
-          id: `${isDeposit ? "deposit" : "withdraw"}-${counter}-${signature.substring(0, 8)}`,
-          timestamp,
-          section,
-          symbol: String(depositWithdraw.tokenId),
-          side: isDeposit ? "buy" : "sell",
-          entryPrice: 0,
-          exitPrice: 0,
-          quantity: amount,
-          amount: amount,
-          value: amount,
-          orderType: "unknown",
-          instrument: `${String(depositWithdraw.tokenId)}/USD`,
-          clientId: depositWithdraw.clientId?.toString() || "unknown",
-          orderId: "N/A",
-          transactionHash: signature,
-          fees: {
-            maker: 0,
-            taker: 0,
-            total: 0,
-            rebates: 0,
-          },
-          pnl: 0,
-          pnlPercentage: 0,
-          duration: 0,
-          status: "breakeven",
-          notes: isDeposit ? "Deposit" : "Withdrawal",
-          tradeType: "spot",
-          logType: logTypeName,
-          discriminator: tag,
-        };
-      }
-
-      default:
-        return null;
-    }
+    return result;
   }
+
+  // ── format helpers ───────────────────────────────────────────────────────
 
   private formatSection(date: Date): string {
     const day = date.getDate().toString().padStart(2, "0");
@@ -1453,97 +1168,14 @@ export class TransactionDataFetcher {
     ];
     const month = monthNames[date.getMonth()];
     const year = date.getFullYear();
-    const hours = date.getHours().toString().padStart(2, "0");
-    const minutes = date.getMinutes().toString().padStart(2, "0");
-    const seconds = date.getSeconds().toString().padStart(2, "0");
-    return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+    const hh = date.getHours().toString().padStart(2, "0");
+    const mm = date.getMinutes().toString().padStart(2, "0");
+    const ss = date.getSeconds().toString().padStart(2, "0");
+    return `${day}-${month}-${year} ${hh}:${mm}:${ss}`;
   }
 
-  // Exposed helper for tests: resolve instrument details using engine/instruments or token registry
-  async resolveInstrumentDetails(instrId?: number) {
-    const result: any = {
-      symbol: `INSTR-${instrId}`,
-      base: "UNKNOWN",
-      quote: "UNKNOWN",
-    };
+  // ── export helpers ───────────────────────────────────────────────────────
 
-    try {
-      if (
-        this.engine &&
-        this.engine.instruments &&
-        typeof this.engine.instruments.get === "function"
-      ) {
-        const meta = this.engine.instruments.get(instrId as any);
-        if (meta && meta.header) {
-          const header = meta.header as any;
-          // Prefer asset/quote mints
-          if (header.assetMint && header.crncyMint) {
-            // Try to resolve token symbols from engine.tokens map
-            const baseMint = header.assetMint;
-            const quoteMint = header.crncyMint;
-            let base = "UNKNOWN";
-            let quote = "UNKNOWN";
-
-            if (this.engine.tokens && this.engine.tokens instanceof Map) {
-              const baseToken = this.engine.tokens.get(baseMint);
-              const quoteToken = this.engine.tokens.get(quoteMint);
-              base = typeof baseToken === "string" ? baseToken : base;
-              quote = typeof quoteToken === "string" ? quoteToken : quote;
-            }
-
-            // Fallback to TokenListProvider
-            if (base === "UNKNOWN" || quote === "UNKNOWN") {
-              try {
-                // dynamic import to reuse existing mocks in tests
-                const {
-                  TokenListProvider,
-                  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-                } = require("@solana/spl-token-registry");
-                const list = await new TokenListProvider().resolve();
-                const tokens = list.getList();
-                const baseEntry = tokens.find(
-                  (t: any) => t.address === baseMint,
-                );
-                const quoteEntry = tokens.find(
-                  (t: any) => t.address === quoteMint,
-                );
-                if (baseEntry) base = baseEntry.symbol;
-                if (quoteEntry) quote = quoteEntry.symbol;
-              } catch (err) {
-                // ignore
-              }
-            }
-
-            result.symbol = `${base}/${quote}`;
-            result.base = base;
-            result.quote = quote;
-            return result;
-          }
-          if (header.assetTokenId && header.crncyTokenId) {
-            // map numeric token ids to symbols if possible
-            const base =
-              (this.engine.tokens &&
-                this.engine.tokens.get(header.assetTokenId)) ||
-              `TOKEN-${header.assetTokenId}`;
-            const quote =
-              (this.engine.tokens &&
-                this.engine.tokens.get(header.crncyTokenId)) ||
-              `TOKEN-${header.crncyTokenId}`;
-            result.symbol = `${base}/${quote}`;
-            result.base = base;
-            result.quote = quote;
-            return result;
-          }
-        }
-      }
-    } catch (err) {
-      // ignore and fallback
-    }
-
-    return result;
-  }
-
-  // Export to CSV
   exportToCSV(tradeRecords: TradeRecord[]): string {
     const headers = [
       "ID",
@@ -1568,6 +1200,7 @@ export class TransactionDataFetcher {
       "Socialized Loss",
       "Total Fee",
       "PNL",
+      "PNL %",
       "Status",
       "Notes",
     ];
@@ -1599,6 +1232,7 @@ export class TransactionDataFetcher {
           (record.socializedLoss || 0).toFixed(9),
           record.fees.total.toFixed(9),
           record.pnl.toFixed(6),
+          record.pnlPercentage.toFixed(4),
           record.status,
           `"${record.notes || ""}"`,
         ].join(","),
@@ -1608,24 +1242,15 @@ export class TransactionDataFetcher {
     return csvRows.join("\n");
   }
 
-  // Export to JSON
   exportToJSON(tradeRecords: TradeRecord[]): string {
     return JSON.stringify(tradeRecords, null, 2);
   }
 
-  // Get summary statistics
   getSummary(tradeRecords: TradeRecord[]): any {
     const spotTrades = tradeRecords.filter((t) => t.tradeType === "spot");
     const perpTrades = tradeRecords.filter((t) => t.tradeType === "perp");
     const fills = tradeRecords.filter(
-      (t) =>
-        t.logType?.includes("FillOrder") ||
-        t.logType?.includes("SpotFillOrder") ||
-        t.logType?.includes("PerpFillOrder") ||
-        t.discriminator === 11 ||
-        t.discriminator === 19 ||
-        t.discriminator === LogType.spotFillOrder ||
-        t.discriminator === LogType.perpFillOrder,
+      (t) => t.discriminator === 11 || t.discriminator === 19,
     );
     const cancels = tradeRecords.filter(
       (t) => t.logType?.includes("Cancel") || t.orderType === "cancel",
@@ -1643,12 +1268,12 @@ export class TransactionDataFetcher {
       orderRevokes: revokes.length,
       totalVolume: tradeRecords.reduce((sum, t) => sum + (t.value || 0), 0),
       totalFees: parseFloat(
-        tradeRecords.reduce((sum, t) => sum + t.fees.total, 0).toFixed(2),
+        tradeRecords.reduce((sum, t) => sum + t.fees.total, 0).toFixed(6),
       ),
       totalRebates: parseFloat(
         tradeRecords
           .reduce((sum, t) => sum + (t.fees.rebates || 0), 0)
-          .toFixed(2),
+          .toFixed(6),
       ),
       totalFunding: tradeRecords.reduce(
         (sum, t) => sum + (t.fundingPayments || 0),
@@ -1664,9 +1289,11 @@ export class TransactionDataFetcher {
         .length,
     };
 
-    summary["netPnl"] = tradeRecords.reduce((sum, t) => sum + t.pnl, 0);
-    summary["netFees"] = parseFloat(
-      (summary.totalFees - summary.totalRebates).toFixed(2),
+    summary.netPnL = parseFloat(
+      tradeRecords.reduce((sum, t) => sum + t.pnl, 0).toFixed(6),
+    );
+    summary.netFees = parseFloat(
+      (summary.totalFees - summary.totalRebates).toFixed(6),
     );
 
     return summary;

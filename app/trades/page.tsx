@@ -20,6 +20,7 @@ import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
 import TradeReviewPanel from "@/components/dashboard/trade-review-panel";
 import { getJournalStatus } from "@/data/mockTrades";
+import { cn } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 20;
 const periods = ["All", "7D", "30D"];
@@ -36,6 +37,7 @@ const TradeHistoryPage = () => {
   // Use real data if wallet is connected, otherwise use mock data
   const { data: realTrades = [], isLoading: realLoading } = useAllTrades({
     enabled: connected && !!publicKey,
+    excludeFees: true,
   });
 
   const { data: mockTrades = [], isLoading: mockLoading } = useMockTrades({
@@ -237,8 +239,7 @@ const TradeHistoryPage = () => {
                   "Date",
                   "Asset",
                   "Side",
-                  "Entry Price",
-                  "Exit Price",
+                  "Price",
                   "Qty",
                   "Fees",
                   "PnL",
@@ -269,16 +270,15 @@ const TradeHistoryPage = () => {
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-2">
                         <span
-                          className="h-2 w-2 rounded-full"
-                          style={{
-                            backgroundColor: trade.symbol.startsWith("SOL")
-                              ? "hsl(var(--primary))"
+                          className={cn("h-2 w-2 rounded-full",
+                            trade.symbol.startsWith("SOL")
+                              ? "bg-primary"
                               : trade.symbol.startsWith("BTC")
-                                ? "hsl(var(--warning))"
+                                ? "bg-warning"
                                 : trade.symbol.startsWith("ETH")
-                                  ? "hsl(270, 70%, 60%)"
-                                  : "hsl(var(--muted-foreground))",
-                          }}
+                                  ? "bg-[hsl(270, 70%, 60%)]"
+                                  : "bg-muted",
+                          )}
                         />
                         <span className="font-mono text-sm font-medium text-foreground">
                           {trade.symbol}
@@ -298,9 +298,6 @@ const TradeHistoryPage = () => {
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
                       {formatPrice(trade.entryPrice)}
-                    </td>
-                    <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
-                      {formatPrice(trade.exitPrice)}
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
                       {trade.quantity.toFixed(2)}

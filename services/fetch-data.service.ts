@@ -222,7 +222,9 @@ export class TransactionDataFetcher {
     }
   }
 
-  async fetchAllTransactions(): Promise<TradeRecord[]> {
+  async fetchAllTransactions({
+    fees,
+  }: { fees?: boolean } | undefined = {}): Promise<TradeRecord[]> {
     if (!this.walletPublicKey) {
       console.warn("Wallet not initialized");
       return [];
@@ -276,9 +278,13 @@ export class TransactionDataFetcher {
       // ── Apply PnL calculation ──────────────────────────────────────────
       const tradesWithPnL = this.applyPnL(rawTrades);
 
-      return tradesWithPnL.sort(
-        (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
-      );
+      return tradesWithPnL
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+        .filter((t) =>
+          fees
+            ? true
+            : !t.logType?.includes("Fees") || !t.orderType?.includes("fee"),
+        );
     } catch (error: any) {
       console.error("Error fetching transactions:", error.message);
       throw error;
@@ -287,23 +293,103 @@ export class TransactionDataFetcher {
 
   // ── private helpers ──────────────────────────────────────────────────────
 
-  /** Run PnLCalculator over all collected trades and merge results back */
+  // ─── PnL helpers ──────────────────────────────────────────────────────────
+
+  /**
+   * Compute pnlPercentage for a single trade record.
+   *
+   * Percentage = (pnl / cost-basis) * 100
+   * Cost-basis  = entryPrice × quantity (i.e. what was risked on the trade).
+   * Falls back to `value` when entryPrice or quantity is 0 (e.g. fee records).
+   */
+  private computePnlPercentage(t: TradeRecord): number {
+    const costBasis =
+      t.entryPrice && t.quantity ? t.entryPrice * t.quantity : t.value || 0;
+    return costBasis !== 0 ? (t.pnl / costBasis) * 100 : 0;
+  }
+
+  /**
+   * Derive a deterministic status string from a numeric pnl value.
+   * Never falls through to a stale status.
+   */
+  private pnlToStatus(pnl: number): TradeRecord["status"] {
+    if (pnl > 0) return "win";
+    if (pnl < 0) return "loss";
+    return "breakeven";
+  }
+
+  /**
+   * Record types whose `pnl` is set inline and must NOT be recalculated by
+   * PnLCalculator (they are not open/close fill pairs).
+   */
+  private static readonly FIXED_PNL_LOG_TYPES = new Set([
+    "spotFees",
+    "perpFees",
+    "perpFunding",
+    "perpSocLoss",
+  ]);
+
+  /** Run PnLCalculator over fill records; preserve pnl for fee/funding/loss records. */
   private applyPnL(trades: TradeRecord[]): TradeRecord[] {
     if (!trades.length) return trades;
-    try {
-      const calc = new PnLCalculator(trades);
-      const withPnL = calc.calculatePnL();
-      // calculatePnL returns trades in the same order, with pnl/status updated
-      return withPnL.map((t) => ({
-        ...t,
-        // ensure status is always set based on pnl
-        status:
-          t.pnl > 0 ? "win" : t.pnl < 0 ? "loss" : (t.status ?? "breakeven"),
-      }));
-    } catch (err: any) {
-      console.warn(`⚠️ PnL calculation failed: ${err.message}`);
-      return trades;
+
+    // Partition: fills go through PnLCalculator; the rest keep their inline pnl.
+    const fillIndices: number[] = [];
+    const fillTrades: TradeRecord[] = [];
+
+    trades.forEach((t, i) => {
+      if (!TransactionDataFetcher.FIXED_PNL_LOG_TYPES.has(t.logType ?? "")) {
+        fillIndices.push(i);
+        fillTrades.push(t);
+      }
+    });
+
+    // Clone the original array so we can splice results back in.
+    const result: TradeRecord[] = trades.map((t) => ({ ...t }));
+
+    // Apply PnL calculator only to fill-type records.
+    if (fillTrades.length) {
+      try {
+        const calc = new PnLCalculator(fillTrades);
+        const withPnL = calc.calculatePnL();
+
+        withPnL.forEach((t, idx) => {
+          const originalIdx = fillIndices[idx];
+          result[originalIdx] = {
+            ...t,
+            pnlPercentage: this.computePnlPercentage(t),
+            status: this.pnlToStatus(t.pnl),
+          };
+        });
+      } catch (err: any) {
+        console.warn(`⚠️ PnL calculation failed: ${err.message}`);
+        // Fallback: leave fill records as-is but still fix status + percentage.
+        fillIndices.forEach((originalIdx) => {
+          const t = result[originalIdx];
+          result[originalIdx] = {
+            ...t,
+            pnlPercentage: this.computePnlPercentage(t),
+            status: this.pnlToStatus(t.pnl),
+          };
+        });
+      }
     }
+
+    // Always recompute pnlPercentage and status for fixed-pnl records too.
+    trades.forEach((_, i) => {
+      if (
+        TransactionDataFetcher.FIXED_PNL_LOG_TYPES.has(trades[i].logType ?? "")
+      ) {
+        const t = result[i];
+        result[i] = {
+          ...t,
+          pnlPercentage: this.computePnlPercentage(t),
+          status: this.pnlToStatus(t.pnl),
+        };
+      }
+    });
+
+    return result;
   }
 
   private async primeClientData(): Promise<void> {
@@ -502,7 +588,8 @@ export class TransactionDataFetcher {
             const deposit = event as DepositReportModel;
             const tokenId = toNum(deposit.tokenId);
             const tokenSymbol = this.getTokenSymbol(tokenId);
-            const amount = toNum(deposit.amount) / 1e9;
+            const amount = toNum(deposit.amount);
+            console.log("Deposit:: ", deposit);
 
             tradeRecords.push({
               id: signature,
@@ -515,7 +602,7 @@ export class TransactionDataFetcher {
               exitPrice: 0,
               quantity: amount,
               amount,
-              value: 0,
+              value: amount,
               orderType: "deposit",
               clientId: toStr(deposit.clientId) || "unknown",
               orderId: "N/A",
@@ -525,7 +612,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Deposit ${amount.toFixed(6)} ${tokenSymbol}`,
+              notes: `Deposit ${(amount)} ${tokenSymbol}`,
               tradeType: "spot",
               logType: "deposit",
               discriminator: tag,
@@ -538,7 +625,8 @@ export class TransactionDataFetcher {
             const withdraw = event as WithdrawReportModel;
             const tokenId = toNum(withdraw.tokenId);
             const tokenSymbol = this.getTokenSymbol(tokenId);
-            const amount = toNum(withdraw.amount) / 1e9;
+            const amount = toNum(withdraw.amount);
+            console.log("Withdraw:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -561,7 +649,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Withdraw ${amount.toFixed(6)} ${tokenSymbol}`,
+              notes: `Withdraw ${(amount)} ${tokenSymbol}`,
               tradeType: "spot",
               logType: "withdraw",
               discriminator: tag,
@@ -574,9 +662,10 @@ export class TransactionDataFetcher {
             const perpDeposit = event as any;
             const instrId = toNum(perpDeposit.instrId);
             const instrumentSymbol = this.getInstrumentSymbol(instrId);
-            const amount = toNum(perpDeposit.amount) / 1e9;
+            const amount = toNum(perpDeposit.amount);
             const perpDetails = await this.resolveInstrumentDetails(instrId);
             const symbol = perpDetails.symbol || instrumentSymbol;
+            console.log("PerpDeposit:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -599,7 +688,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Perp Deposit ${amount.toFixed(6)} to ${symbol}`,
+              notes: `Perp Deposit ${(amount)} to ${symbol}`,
               tradeType: "perp",
               logType: "perpDeposit",
               discriminator: tag,
@@ -615,8 +704,9 @@ export class TransactionDataFetcher {
             const details = await this.resolveInstrumentDetails(instrId);
             const symbol = details.symbol || instrumentSymbol;
             const side = placeOrder.side === 0 ? "buy" : "sell";
-            const quantity = toNum(placeOrder.qty) / 1e9;
+            const quantity = toNum(placeOrder.qty);
             const price = toNum(placeOrder.price);
+            console.log("SpotPlaceOrder:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -650,25 +740,16 @@ export class TransactionDataFetcher {
           // ── Spot Fill (Trade) — discriminator 11 ─────────────────────
           case LogType.spotFillOrder: {
             const fill = event as SpotFillOrderReportModel;
-            // instrId is the canonical instrument ID; crncy here is the USDC amount
-            const instrId =
-              this.extractInstrumentId(fill) ??
-              (() => {
-                // last-resort: use crncy only if it looks like an ID
-                const c = toNum((fill as any).crncy);
-                return c < 1_000_000 ? c : 0;
-              })();
-            const instrumentSymbol = this.getInstrumentSymbol(instrId);
-            const details = await this.resolveInstrumentDetails(instrId);
-            const symbol = details.symbol || instrumentSymbol;
+            const symbol = "SOL";
 
             const side = fill.side === 0 ? "buy" : "sell";
-            const quantity = toNum(fill.qty) / 1e9;
+            const quantity = toNum(fill.qty);
             // price is already human-readable (engine scales it)
             const price = toNum(fill.price);
             // crncy here = USDC value of the fill
-            const value = toNum((fill as any).crncy) / 1e9;
-            const rebates = fill.rebates ? -(toNum(fill.rebates) / 1e9) : 0;
+            const value = toNum((fill as any).crncy);
+            const rebates = fill.rebates ? -toNum(fill.rebates) : 0;
+            console.log("SpotFillOrder:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -702,15 +783,12 @@ export class TransactionDataFetcher {
           // ── Spot New Order ────────────────────────────────────────────
           case LogType.spotNewOrder: {
             const newOrder = event as any;
-            const instrId = this.extractInstrumentId(newOrder);
-            const details = instrId
-              ? await this.resolveInstrumentDetails(instrId)
-              : undefined;
-            const symbol = details?.symbol || "SOL/USDC";
+            const symbol = "SOL";
             const side = newOrder.side === 0 ? "buy" : "sell";
-            const quantity = toNum(newOrder.qty) / 1e9;
-            const crncyValue = toNum(newOrder.crncy) / 1e9;
+            const quantity = toNum(newOrder.qty);
+            const crncyValue = toNum(newOrder.crncy);
             const price = quantity > 0 ? crncyValue / quantity : 0;
+            console.log("SpotNewOrder:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -744,14 +822,15 @@ export class TransactionDataFetcher {
           // ── Spot Fees ─────────────────────────────────────────────────
           case LogType.spotFees: {
             const fees = event as SpotFeesReportModel;
-            const feeAmount = toNum(fees.fees) / 1e9;
-            const refPayment = toNum(fees.refPayment) / 1e9;
+            const feeAmount = toNum(fees.fees);
+            const refPayment = toNum(fees.refPayment);
+            console.log("SpotFees:: ", event);
 
             tradeRecords.push({
               id: signature,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
-              symbol: "USDC",
+              symbol: "SOL",
               side: "sell",
               instrument: "Fees",
               entryPrice: 0,
@@ -773,7 +852,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: feeAmount > 0 ? "loss" : "breakeven",
-              notes: `Trading Fees: ${feeAmount.toFixed(6)} USDC, Ref Payment: ${refPayment.toFixed(6)}`,
+              notes: `Trading Fees: ${(feeAmount)} SOL, Ref Payment: ${refPayment.toFixed(6)}`,
               tradeType: "spot",
               logType: "spotFees",
               discriminator: tag,
@@ -793,12 +872,11 @@ export class TransactionDataFetcher {
               (instrId !== undefined ? `PERP-${instrId}` : "PERP-UNKNOWN");
 
             const isLong = perpFill.side === 0;
-            const quantity = toNum(perpFill.perps) / 1e9;
+            const quantity = toNum(perpFill.perps);
             const price = toNum(perpFill.price);
-            const crncyValue = toNum((perpFill as any).crncy) / 1e9;
-            const rebates = perpFill.rebates
-              ? -(toNum(perpFill.rebates) / 1e9)
-              : 0;
+            const crncyValue = toNum((perpFill as any).crncy);
+            const rebates = perpFill.rebates ? -toNum(perpFill.rebates) : 0;
+            console.log("PerpFillOrder:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -836,7 +914,8 @@ export class TransactionDataFetcher {
               this.extractInstrumentId(funding) ?? toNum(funding.instrId);
             const details = await this.resolveInstrumentDetails(instrId);
             const symbol = details.symbol || `PERP-${instrId}`;
-            const fundingValue = toNum(funding.funding) / 1e9;
+            const fundingValue = toNum(funding.funding);
+            console.log("PerpFunding:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -859,7 +938,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: fundingValue > 0 ? "win" : "loss",
-              notes: `${fundingValue > 0 ? "Received" : "Paid"} Funding: ${Math.abs(fundingValue).toFixed(6)} USDC`,
+              notes: `${fundingValue > 0 ? "Received" : "Paid"} Funding: ${(Math.abs(fundingValue))} SOL`,
               tradeType: "perp",
               fundingPayments: fundingValue,
               logType: "perpFunding",
@@ -871,13 +950,14 @@ export class TransactionDataFetcher {
           // ── Perp Fees ─────────────────────────────────────────────────
           case LogType.perpFees: {
             const perpFees = event as PerpFeesReportModel;
-            const feeAmount = toNum((perpFees as any).fees) / 1e9;
+            const feeAmount = toNum((perpFees as any).fees);
+            console.log("PerpFees:: ", event);
 
             tradeRecords.push({
               id: signature,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
-              symbol: "USDC",
+              symbol: "SOL",
               side: "sell",
               instrument: "Perp Fees",
               entryPrice: 0,
@@ -894,7 +974,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: feeAmount > 0 ? "loss" : "breakeven",
-              notes: `Perp Trading Fees: ${feeAmount.toFixed(6)} USDC`,
+              notes: `Perp Trading Fees: ${(feeAmount)} SOL`,
               tradeType: "perp",
               logType: "perpFees",
               discriminator: tag,
@@ -908,7 +988,8 @@ export class TransactionDataFetcher {
             const instrId = toNum(socLoss.instrId);
             const details = await this.resolveInstrumentDetails(instrId);
             const symbol = details.symbol || `PERP-${instrId}`;
-            const lossValue = toNum(socLoss.socLoss) / 1e9;
+            const lossValue = toNum(socLoss.socLoss);
+            console.log("Perp Socialized Loss:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -931,7 +1012,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: "loss",
-              notes: `Socialized Loss: ${lossValue.toFixed(6)} USDC`,
+              notes: `Socialized Loss: ${(lossValue)} USDC`,
               tradeType: "perp",
               socializedLoss: lossValue,
               logType: "perpSocLoss",
@@ -955,8 +1036,9 @@ export class TransactionDataFetcher {
                   ? `PERP-${instrId}`
                   : this.getInstrumentSymbol(instrId)
                 : "UNKNOWN");
-            const quantity = toNum(revoke.qty) / 1e9;
+            const quantity = toNum(revoke.qty);
             const price = toNum((revoke as any).price);
+            console.log(isPerp ? "Perp" : "Spot", "OrderRevoked:: ", event);
 
             tradeRecords.push({
               id: signature,
@@ -1087,16 +1169,18 @@ export class TransactionDataFetcher {
               const baseToken = this.engine.tokens.get(baseMint);
               const quoteToken = this.engine.tokens.get(quoteMint);
               if (typeof baseToken === "string") base = baseToken;
-              else if (baseToken && typeof baseToken === "object") base = (baseToken.symbol as string) || base;
+              else if (baseToken && typeof baseToken === "object")
+                base = (baseToken.symbol as string) || base;
               if (typeof quoteToken === "string") quote = quoteToken;
-              else if (quoteToken && typeof quoteToken === "object") quote = (quoteToken.symbol as string) || quote;
+              else if (quoteToken && typeof quoteToken === "object")
+                quote = (quoteToken.symbol as string) || quote;
             }
 
             if (base === "UNKNOWN" || quote === "UNKNOWN") {
               try {
                 const {
                   TokenListProvider,
-                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
                 } = require("@solana/spl-token-registry");
                 const list = await new TokenListProvider().resolve();
                 const tokens = list.getList();
@@ -1126,12 +1210,22 @@ export class TransactionDataFetcher {
             header.assetTokenId !== undefined &&
             header.crncyTokenId !== undefined
           ) {
-            const baseRaw = this.engine.tokens?.get(header.assetTokenId) || this.getTokenSymbol(toNum(header.assetTokenId));
-            const quoteRaw = this.engine.tokens?.get(header.crncyTokenId) || this.getTokenSymbol(toNum(header.crncyTokenId));
+            const baseRaw =
+              this.engine.tokens?.get(header.assetTokenId) ||
+              this.getTokenSymbol(toNum(header.assetTokenId));
+            const quoteRaw =
+              this.engine.tokens?.get(header.crncyTokenId) ||
+              this.getTokenSymbol(toNum(header.crncyTokenId));
 
             // normalize to string symbol if token entries are objects
-            const base = typeof baseRaw === "string" ? baseRaw : baseRaw?.symbol ?? String(baseRaw);
-            const quote = typeof quoteRaw === "string" ? quoteRaw : quoteRaw?.symbol ?? String(quoteRaw);
+            const base =
+              typeof baseRaw === "string"
+                ? baseRaw
+                : (baseRaw?.symbol ?? String(baseRaw));
+            const quote =
+              typeof quoteRaw === "string"
+                ? quoteRaw
+                : (quoteRaw?.symbol ?? String(quoteRaw));
 
             return {
               symbol: `${base}/${quote}`,

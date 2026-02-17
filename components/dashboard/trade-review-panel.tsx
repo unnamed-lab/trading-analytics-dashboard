@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
+import formatBigNumber, { shortenHash } from "@/utils/number-format";
 
 const priceData = [
   { time: "09:00", price: 140 },
@@ -133,7 +134,8 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
             <div className="bg-card p-3">
               <span className="text-xs text-muted-foreground">Quantity</span>
               <p className="font-mono text-sm text-primary mt-1">
-                {trade.quantity.toFixed(2)} {trade.symbol.split("/")[0]}
+                {formatBigNumber(trade.quantity, 2)}{" "}
+                {trade.symbol.split("/")[0]}
               </p>
             </div>
             <div className="bg-card p-3">
@@ -288,7 +290,9 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
           <div className="text-xs text-muted-foreground space-y-1">
             <p>
               <span className="text-muted-foreground/70">Tx:</span>{" "}
-              <span className="font-mono">{trade.transactionHash}</span>
+              <span className="font-mono" title={trade.transactionHash}>
+                {shortenHash(trade.transactionHash)}
+              </span>
             </p>
             <p>
               <span className="text-muted-foreground/70">Type:</span>{" "}

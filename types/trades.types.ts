@@ -347,6 +347,7 @@ export function isBullishSide(side: TradeRecord["side"]): boolean {
 }
 
 export function formatPrice(price: number): string {
+  if (price === 0) return "-"
   if (price >= 1000) {
     return price.toLocaleString("en-US", {
       minimumFractionDigits: 2,
@@ -356,8 +357,12 @@ export function formatPrice(price: number): string {
   return price.toFixed(price < 1 ? 6 : 2);
 }
 
+export function formatLamports(lamports: number): string {
+  const sol = lamports / 1e9;
+  return formatPrice(sol);
+}
+
 export function formatPnl(pnl: number): string {
   const prefix = pnl >= 0 ? "+" : "";
   return `${prefix}$${Math.abs(pnl).toFixed(2)}`;
 }
-

@@ -298,7 +298,7 @@ export class TradeAnalyticsCalculator {
       summary: {
         totalTrades: this.trades.length,
         totalPnl: this.trades.reduce((s, t) => s + t.pnl, 0),
-        totalVolume: this.trades.reduce((s, t) => s + (t.value || 0), 0),
+        totalVolume: this.trades.reduce((s, t) => s + (t.value || 0), 0) * 1e9,
         winRate,
         profitFactor: this.calculateProfitFactor(),
         ...avgWinLoss,
@@ -309,10 +309,10 @@ export class TradeAnalyticsCalculator {
         ...bias,
         longVolume: this.trades
           .filter((t) => t.side === "long" || t.side === "buy")
-          .reduce((s, t) => s + (t.value || 0), 0),
+          .reduce((s, t) => s + (t.value || 0), 0) * 1e9,
         shortVolume: this.trades
           .filter((t) => t.side === "short" || t.side === "sell")
-          .reduce((s, t) => s + (t.value || 0), 0),
+          .reduce((s, t) => s + (t.value || 0), 0) * 1e9,
       },
       timing: {
         avgDuration: this.calculateAvgTradeDuration(),

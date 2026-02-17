@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useAllTrades, useMockTrades } from "@/hooks/use-trade-queries";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { TradeRecord } from "@/types";
-import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
+import { formatSide, isBullishSide, formatPrice } from "@/types";
 import TradeReviewPanel from "./trade-review-panel";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
@@ -17,6 +17,7 @@ const TradeHistory = () => {
   // Use real data if wallet is connected, otherwise use mock data
   const { data: realTrades = [], isLoading: realLoading } = useAllTrades({
     enabled: connected && !!publicKey,
+    excludeFees: true,
   });
 
   const { data: mockTrades = [], isLoading: mockLoading } = useMockTrades({
@@ -25,7 +26,7 @@ const TradeHistory = () => {
 
   const trades = connected ? realTrades : mockTrades;
   const isLoading = connected ? realLoading : mockLoading;
-  const recentTrades = trades.slice(0, 4);
+  const recentTrades = trades.slice(0, 9);
 
   if (isLoading) {
     return (
@@ -71,16 +72,16 @@ const TradeHistory = () => {
           </Link>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-180 table-auto">
             <thead>
               <tr className="border-t border-border">
                 {[
                   "Date",
                   "Symbol",
+                  "Type",
                   "Side",
-                  "Entry Price",
-                  "Exit Price",
-                  "PnL",
+                  "Price",
+                  "Amount",
                   "Notes",
                 ].map((h) => (
                   <th
@@ -107,6 +108,9 @@ const TradeHistory = () => {
                     <td className="px-5 py-3.5 font-mono text-sm font-medium text-foreground">
                       {trade.symbol}
                     </td>
+                    <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground capitalize">
+                      {trade.tradeType || "N/A"}
+                    </td>
                     <td className="px-5 py-3.5">
                       <span
                         className={`rounded px-2 py-0.5 text-xs font-bold ${
@@ -119,19 +123,22 @@ const TradeHistory = () => {
                       </span>
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
-                      {formatPrice(trade.entryPrice)}
+                      {formatPrice(trade?.entryPrice )|| "-"}
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
-                      {formatPrice(trade.exitPrice)}
+                      {trade?.amount || 0}
                     </td>
-                    <td
+                    {/* <td
                       className={`px-5 py-3.5 font-mono text-sm font-medium ${
                         trade.pnl >= 0 ? "text-profit" : "text-loss"
                       }`}
                     >
                       {formatPnl(trade.pnl)}
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-50 truncate">
+                    </td> */}
+                    <td
+                      className="px-5 py-3.5 text-sm text-muted-foreground max-w-[14rem] truncate"
+                      title={trade.notes}
+                    >
                       {trade.notes}
                     </td>
                   </tr>

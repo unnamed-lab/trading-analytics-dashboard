@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { TrendingUp, Target, BarChart3, Coins, ArrowUpDown } from "lucide-react";
 import { useTradeAnalytics, useCalculatedPnL } from "@/hooks/use-trade-queries";
 
@@ -24,11 +25,11 @@ export default function KPIRow({ analyticsProp }: { analyticsProp?: AnalyticsSum
 
   const a = analyticsProp ?? (analytics as any) ?? {};
 
-  const totalPnl = a.totalPnl ?? (analytics?.summary?.totalPnl ?? 12450.23);
-  const winRate = a.winRate ?? (analytics?.summary?.winRate ?? 64.2);
-  const totalVolume = a.totalVolume ?? (analytics?.summary?.totalVolume ?? 2400000);
-  const totalFees = a.totalFees ?? (analytics?.fees?.totalFees ?? -1204.5);
-  const directional = analytics?.directional ?? { long: 65, short: 35 };
+  const totalPnl = a.totalPnl ?? (analytics?.summary?.totalPnl ?? 0.00);
+  const winRate = a.winRate ?? (analytics?.summary?.winRate ?? 0.00);
+  const totalVolume = a.totalVolume ?? (analytics?.summary?.totalVolume ?? 0.00);
+  const totalFees = a.totalFees ?? ((analytics?.fees?.totalFees * 1e9) || 0.00);
+  const directional = analytics?.directional ?? { long: 0, short: 0 };
 
   const kpis = [
     {
@@ -46,13 +47,13 @@ export default function KPIRow({ analyticsProp }: { analyticsProp?: AnalyticsSum
     },
     {
       label: "VOLUME",
-      value: `$${(totalVolume >= 1000 ? (totalVolume / 1000).toFixed(1) + "k" : totalVolume)}`,
+      value: `$${(totalVolume >= 1000 ? (totalVolume / 1000).toFixed(1) + "k" : totalVolume.toFixed(2))}`,
       sub: `${detailedPnL?.length ?? 0} Trades`,
       icon: defaultIcons.volume,
     },
     {
       label: "FEES PAID",
-      value: `${totalFees < 0 ? "-" : "+"}$${Math.abs(totalFees).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: `${totalFees < 0 ? "-" : "+"}$${Math.abs(totalFees).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 9 })}`,
       sub: analytics?.fees ? undefined : "0.05% Avg Fee",
       icon: defaultIcons.fees,
       negative: totalFees < 0,

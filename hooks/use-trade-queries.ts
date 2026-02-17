@@ -104,14 +104,16 @@ export const useTradesInfinite = (limit: number = 50) => {
 // ============================================
 // All Trades Query (For smaller datasets)
 // ============================================
-export const useAllTrades = (options?: { enabled?: boolean }) => {
+export const useAllTrades = (options?: { enabled?: boolean, excludeFees?: boolean }) => {
   const { fetcher, publicKey } = useTransactionFetcher();
 
   return useQuery({
     queryKey: tradeKeys.list(publicKey?.toString(), { type: "all" }),
     queryFn: async (): Promise<TradeRecord[]> => {
       if (!publicKey) throw new Error("Wallet not connected");
-      return fetcher.fetchAllTransactions();
+      return fetcher.fetchAllTransactions({fees: options?.excludeFees}).then(trades =>
+        trades.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
+      );
     },
     enabled: !!publicKey && (options?.enabled ?? true),
     staleTime: 5 * 60 * 1000,
@@ -122,22 +124,6 @@ export const useAllTrades = (options?: { enabled?: boolean }) => {
   });
 };
 
-// ============================================
-// Instrument-Specific Trades
-// ============================================
-export const useInstrumentTrades = (instrumentId: number) => {
-  const { fetcher, publicKey } = useTransactionFetcher();
-
-  return useQuery({
-    queryKey: tradeKeys.instrument(instrumentId, publicKey?.toString()),
-    queryFn: async (): Promise<TradeRecord[]> => {
-      if (!publicKey) throw new Error("Wallet not connected");
-      return fetcher.fetchTradesForInstrument(instrumentId);
-    },
-    enabled: !!publicKey && instrumentId > 0,
-    staleTime: 5 * 60 * 1000,
-  });
-};
 
 // ============================================
 // Trade Summary Statistics

@@ -4,96 +4,82 @@ export class PnLCalculator {
   private trades: TradeRecord[];
 
   constructor(trades: TradeRecord[]) {
+    // Sort chronologically for FIFO matching
     this.trades = [...trades].sort(
       (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
     );
   }
 
   /**
-   * Calculate PnL by pairing entry and exit fills using FIFO.
-   *
-   * Rules:
-   *  • Only discriminator 11 (spotFill) and 19 (perpFill) are matched.
-   *  • "Entry"  = buy / long side
-   *  • "Exit"   = sell / short side  (closes a long)
-   *  •  OR:
-   *  • "Entry"  = short / sell side  (opens a short)
-   *  • "Exit"   = buy  / long  side  (closes a short)
-   *
-   * We track open positions per symbol grouped by trade direction so that
-   * longs and shorts are matched independently.
-   *
-   * Fees recorded on each fill are proportionally allocated to the matched
-   * quantity so a partial close only charges the correct fraction of fees.
+   * Calculate PnL by matching entry and exit fills using FIFO.
+   * Supports both spot (discriminator 11) and perp (discriminator 19) fills.
    */
   calculatePnL(): TradeRecord[] {
     const result: TradeRecord[] = [];
 
-    // openPositions[symbol][direction] = queue of open positions
-    // direction: "long" | "short"
+    // Track open positions per symbol: Map<symbol, Array<open positions>>
     const openPositions: Map<
       string,
-      Map<"long" | "short", Array<{ trade: TradeRecord; remainingQty: number }>>
+      Array<{
+        trade: TradeRecord;
+        remainingQty: number;
+        direction: "long" | "short";
+      }>
     > = new Map();
 
-    const getQueue = (symbol: string, dir: "long" | "short") => {
-      if (!openPositions.has(symbol)) {
-        openPositions.set(symbol, new Map());
-      }
-      const symMap = openPositions.get(symbol)!;
-      if (!symMap.has(dir)) symMap.set(dir, []);
-      return symMap.get(dir)!;
-    };
-
     for (const trade of this.trades) {
-      // Pass non-fill events through unchanged
+      // Only process fill events
       if (trade.discriminator !== 11 && trade.discriminator !== 19) {
         result.push({ ...trade });
         continue;
       }
 
-      const isBuyOrLong = trade.side === "buy" || trade.side === "long";
+      // Normalize side to "long" or "short"
+      const isLong = trade.side === "long" || trade.side === "buy";
+      const direction = isLong ? "long" : "short";
+      const oppositeDirection = isLong ? "short" : "long";
 
-      if (isBuyOrLong) {
-        // ── Opening a long (or closing a short) ──────────────────────────
-        const shortQueue = getQueue(trade.symbol, "short");
+      // Get or create position queue for this symbol
+      if (!openPositions.has(trade.symbol)) {
+        openPositions.set(trade.symbol, []);
+      }
+      const positions = openPositions.get(trade.symbol)!;
 
-        if (shortQueue.length > 0) {
-          // Closing an existing short position
-          result.push(...this.matchAgainstQueue(trade, shortQueue, "short"));
-        } else {
-          // New long entry
-          getQueue(trade.symbol, "long").push({
+      // Check if we have any opposite-direction positions to close
+      const oppositePositions = positions.filter(
+        (p) => p.direction === oppositeDirection,
+      );
+
+      if (oppositePositions.length > 0) {
+        // Closing existing position(s)
+        result.push(
+          ...this.matchAgainstQueue(
             trade,
-            remainingQty: trade.quantity,
-          });
-          result.push({
-            ...trade,
-            pnl: 0,
-            pnlPercentage: 0,
-            status: "breakeven",
-          });
-        }
+            oppositePositions,
+            oppositeDirection,
+          ),
+        );
+
+        // Remove fully closed positions
+        const remainingPositions = positions.filter(
+          (p) => p.remainingQty > 1e-12,
+        );
+        openPositions.set(trade.symbol, remainingPositions);
       } else {
-        // ── Opening a short (or closing a long) ──────────────────────────
-        const longQueue = getQueue(trade.symbol, "long");
+        // Opening new position
+        positions.push({
+          trade,
+          remainingQty: trade.quantity,
+          direction,
+        });
 
-        if (longQueue.length > 0) {
-          // Closing an existing long position
-          result.push(...this.matchAgainstQueue(trade, longQueue, "long"));
-        } else {
-          // New short entry
-          getQueue(trade.symbol, "short").push({
-            trade,
-            remainingQty: trade.quantity,
-          });
-          result.push({
-            ...trade,
-            pnl: 0,
-            pnlPercentage: 0,
-            status: "breakeven",
-          });
-        }
+        // Return trade with zero PnL (opening)
+        result.push({
+          ...trade,
+          pnl: 0,
+          pnlPercentage: 0,
+          status: "breakeven",
+        });
       }
     }
 
@@ -101,67 +87,70 @@ export class PnLCalculator {
   }
 
   /**
-   * Match an exit trade against a queue of open positions (FIFO).
-   * Returns one TradeRecord per matched segment (usually just one).
+   * Match an exit trade against open positions using FIFO
    */
   private matchAgainstQueue(
     exitTrade: TradeRecord,
-    queue: Array<{ trade: TradeRecord; remainingQty: number }>,
-    openDirection: "long" | "short",
+    positions: Array<{
+      trade: TradeRecord;
+      remainingQty: number;
+      direction: string;
+    }>,
+    closingDirection: "long" | "short",
   ): TradeRecord[] {
     const results: TradeRecord[] = [];
     let remainingExitQty = exitTrade.quantity;
     let totalPnl = 0;
-    let totalMatchedValue = 0;
+    let totalExitValue = 0;
 
-    while (remainingExitQty > 0 && queue.length > 0) {
-      const head = queue[0];
-      const matchedQty = Math.min(head.remainingQty, remainingExitQty);
+    // Process positions in FIFO order (as they appear in the array)
+    for (let i = 0; i < positions.length && remainingExitQty > 1e-12; i++) {
+      const position = positions[i];
+      const matchedQty = Math.min(position.remainingQty, remainingExitQty);
 
-      const entryPrice = head.trade.entryPrice;
+      const entryPrice = position.trade.entryPrice || 0;
       const exitPrice = exitTrade.entryPrice || exitTrade.exitPrice || 0;
 
-      const entryValue = matchedQty * entryPrice;
-      const exitValue = matchedQty * exitPrice;
+      // Calculate PnL based on direction being closed
+      let rawPnl: number;
+      if (closingDirection === "long") {
+        // Closing a long: exit price - entry price
+        rawPnl = (exitPrice - entryPrice) * matchedQty;
+      } else {
+        // Closing a short: entry price - exit price
+        rawPnl = (entryPrice - exitPrice) * matchedQty;
+      }
 
-      // Proportional fee allocation
+      // Calculate proportional fees
       const entryFee =
-        (head.trade.fees?.total || 0) *
-        (matchedQty / Math.max(head.trade.quantity, 1e-18));
+        (position.trade.fees?.total || 0) *
+        (matchedQty / position.trade.quantity);
       const exitFee =
-        (exitTrade.fees?.total || 0) *
-        (matchedQty / Math.max(exitTrade.quantity, 1e-18));
+        (exitTrade.fees?.total || 0) * (matchedQty / exitTrade.quantity);
 
-      // PnL direction:
-      //  • closing a long  → exitValue - entryValue  (sell price minus buy price)
-      //  • closing a short → entryValue - exitValue  (short entry minus buy-back)
-      const rawPnl =
-        openDirection === "long"
-          ? exitValue - entryValue
-          : entryValue - exitValue;
-
+      // Net PnL after fees
       const pnl = rawPnl - entryFee - exitFee;
 
       totalPnl += pnl;
-      totalMatchedValue += exitValue;
+      totalExitValue += exitPrice * matchedQty;
 
-      head.remainingQty -= matchedQty;
+      // Update remaining quantities
+      position.remainingQty -= matchedQty;
       remainingExitQty -= matchedQty;
-
-      if (head.remainingQty <= 1e-12) queue.shift();
     }
 
+    // Create result trade with calculated PnL
     const pnlStatus: TradeRecord["status"] =
-      totalPnl > 0 ? "win" : totalPnl < 0 ? "loss" : "breakeven";
+      totalPnl > 1e-12 ? "win" : totalPnl < -1e-12 ? "loss" : "breakeven";
 
     results.push({
       ...exitTrade,
       pnl: totalPnl,
-      pnlPercentage:
-        totalMatchedValue > 0 ? (totalPnl / totalMatchedValue) * 100 : 0,
+      pnlPercentage: totalExitValue > 0 ? (totalPnl / totalExitValue) * 100 : 0,
       status: pnlStatus,
     });
 
+    // Log warning for unmatched quantity
     if (remainingExitQty > 1e-12) {
       console.warn(
         `⚠️ Unmatched exit quantity for ${exitTrade.symbol}: ${remainingExitQty.toFixed(6)}`,
@@ -172,50 +161,14 @@ export class PnLCalculator {
   }
 
   /**
-   * Quick net summary: total realised PnL, fees paid, and net (PnL − fees + funding).
-   */
-  calculatePnLSummary(): {
-    totalPnL: number;
-    totalFees: number;
-    totalFunding: number;
-    netPnL: number;
-  } {
-    const detailed = this.calculatePnL();
-    const totalPnL = detailed.reduce((sum, t) => sum + (t.pnl || 0), 0);
-    const totalFees = this.trades.reduce(
-      (sum, t) => sum + (t.fees?.total || 0),
-      0,
-    );
-    const totalFunding = this.trades.reduce(
-      (sum, t) => sum + (t.fundingPayments || 0),
-      0,
-    );
-    return {
-      totalPnL,
-      totalFees,
-      totalFunding,
-      netPnL: totalPnL - totalFees + totalFunding,
-    };
-  }
-
-  /**
-   * Alternative PnL using the average-cost method (good for positions built
-   * up in multiple legs).
+   * Calculate PnL using average cost method (alternative approach)
    */
   calculateAverageCostPnL(): TradeRecord[] {
     const result: TradeRecord[] = [];
-    // avgCosts[symbol][direction]
-    const avgCosts: Map<
-      string,
-      Map<"long" | "short", { avgPrice: number; totalQty: number }>
-    > = new Map();
 
-    const getCost = (symbol: string, dir: "long" | "short") => {
-      if (!avgCosts.has(symbol)) avgCosts.set(symbol, new Map());
-      const m = avgCosts.get(symbol)!;
-      if (!m.has(dir)) m.set(dir, { avgPrice: 0, totalQty: 0 });
-      return m.get(dir)!;
-    };
+    // Track average cost per symbol: Map<symbol, { avgPrice: number; totalQty: number }>
+    const avgCosts: Map<string, { avgPrice: number; totalQty: number }> =
+      new Map();
 
     for (const trade of this.trades) {
       if (trade.discriminator !== 11 && trade.discriminator !== 19) {
@@ -223,46 +176,56 @@ export class PnLCalculator {
         continue;
       }
 
-      const isBuyOrLong = trade.side === "buy" || trade.side === "long";
-      const openDir: "long" | "short" = isBuyOrLong ? "long" : "short";
-      const closeDir: "long" | "short" = isBuyOrLong ? "short" : "long";
+      const isLong = trade.side === "long" || trade.side === "buy";
 
-      const closeCost = getCost(trade.symbol, closeDir);
+      if (!avgCosts.has(trade.symbol)) {
+        avgCosts.set(trade.symbol, { avgPrice: 0, totalQty: 0 });
+      }
 
-      if (closeCost.totalQty > 1e-12) {
-        // Closing an opposite position
-        const exitPrice = trade.entryPrice;
+      const cost = avgCosts.get(trade.symbol)!;
+
+      if ((isLong && cost.totalQty < 0) || (!isLong && cost.totalQty > 0)) {
+        // Closing trade - opposite direction of current position
+        const closingQty = Math.min(Math.abs(cost.totalQty), trade.quantity);
+        const entryPrice = cost.avgPrice;
+        const exitPrice = trade.entryPrice || 0;
+
+        // Calculate PnL based on position direction
         const rawPnl =
-          closeDir === "long"
-            ? (exitPrice - closeCost.avgPrice) * trade.quantity
-            : (closeCost.avgPrice - exitPrice) * trade.quantity;
+          cost.totalQty > 0
+            ? (exitPrice - entryPrice) * closingQty // Closing long
+            : (entryPrice - exitPrice) * closingQty; // Closing short
+
         const fee = trade.fees?.total || 0;
         const pnl = rawPnl - fee;
-        const exitValue = exitPrice * trade.quantity;
-
-        const pnlStatus: TradeRecord["status"] =
-          pnl > 0 ? "win" : pnl < 0 ? "loss" : "breakeven";
+        const exitValue = exitPrice * closingQty;
 
         result.push({
           ...trade,
           pnl,
           pnlPercentage: exitValue > 0 ? (pnl / exitValue) * 100 : 0,
-          status: pnlStatus,
+          status: pnl > 1e-12 ? "win" : pnl < -1e-12 ? "loss" : "breakeven",
         });
 
-        closeCost.totalQty = Math.max(0, closeCost.totalQty - trade.quantity);
-        if (closeCost.totalQty < 1e-12) {
-          closeCost.avgPrice = 0;
-          closeCost.totalQty = 0;
+        // Update average cost
+        cost.totalQty =
+          cost.totalQty > 0
+            ? cost.totalQty - closingQty
+            : cost.totalQty + closingQty;
+
+        if (Math.abs(cost.totalQty) < 1e-12) {
+          cost.avgPrice = 0;
+          cost.totalQty = 0;
         }
       } else {
-        // Opening / adding to a position
-        const cost = getCost(trade.symbol, openDir);
+        // Opening trade - same direction as current position
         const newTotalValue =
-          cost.avgPrice * cost.totalQty + trade.entryPrice * trade.quantity;
-        const newTotalQty = cost.totalQty + trade.quantity;
+          cost.avgPrice * Math.abs(cost.totalQty) +
+          (trade.entryPrice || 0) * trade.quantity;
+        const newTotalQty = Math.abs(cost.totalQty) + trade.quantity;
+
         cost.avgPrice = newTotalQty > 0 ? newTotalValue / newTotalQty : 0;
-        cost.totalQty = newTotalQty;
+        cost.totalQty = isLong ? newTotalQty : -newTotalQty;
 
         result.push({
           ...trade,
@@ -274,5 +237,49 @@ export class PnLCalculator {
     }
 
     return result;
+  }
+
+  /**
+   * Calculate summary statistics
+   */
+  calculatePnLSummary(): {
+    totalPnL: number;
+    totalFees: number;
+    totalFunding: number;
+    netPnL: number;
+    totalVolume: number;
+    totalTrades: number;
+    winningTrades: number;
+    losingTrades: number;
+  } {
+    const tradesWithPnL = this.calculatePnL();
+
+    const totalPnL = tradesWithPnL.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const totalFees = this.trades.reduce(
+      (sum, t) => sum + (t.fees?.total || 0),
+      0,
+    );
+    const totalFunding = this.trades.reduce(
+      (sum, t) => sum + (t.fundingPayments || 0),
+      0,
+    );
+    const totalVolume = this.trades.reduce(
+      (sum, t) => sum + (t.entryPrice || 0) * t.quantity,
+      0,
+    );
+
+    const winningTrades = tradesWithPnL.filter((t) => t.pnl > 1e-12).length;
+    const losingTrades = tradesWithPnL.filter((t) => t.pnl < -1e-12).length;
+
+    return {
+      totalPnL,
+      totalFees,
+      totalFunding,
+      netPnL: totalPnL - totalFees + totalFunding,
+      totalVolume,
+      totalTrades: tradesWithPnL.length,
+      winningTrades,
+      losingTrades,
+    };
   }
 }

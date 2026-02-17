@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "dotenv/config";
 import { Signature, address, createSolanaRpc, devnet } from "@solana/kit";
@@ -562,6 +563,11 @@ export class TransactionDataFetcher {
       const logMessages: string[] = tx.meta?.logMessages ?? [];
       if (!logMessages.length) return tradeRecords;
 
+      // === PART A: Extract Network Fee (SOL) ===
+      const txData = tx as any;
+      const rawFee = txData?.meta?.fee || 0;
+      const networkFee = Number(rawFee) / 1e9; // Convert Lamports to SOL
+
       const decodedEvents: DecodedLogMessage[] = [];
 
       if (this.engineInitialized && this.engine) {
@@ -571,13 +577,40 @@ export class TransactionDataFetcher {
             decodedEvents.push(...allDecoded);
           }
         } catch (_) {
-          // ignore decode errors — no fallback raw parsing needed here
+          // ignore decode errors
         }
       }
 
       const blockTs = sigInfo.blockTime
         ? new Date(Number(sigInfo.blockTime) * 1000)
         : new Date();
+
+      // === PART B: Calculate Protocol Fees (USDC) ===
+      let totalProtocolFees = 0;
+
+      decodedEvents.forEach((event: any) => {
+        // Check for fee-related events (tag 15 = spotFees, tag 23 = perpFees)
+        if (event.tag === 15 || event.tag === 23) {
+          const feeAmount = Math.abs(toNum(event.fees || 0));
+          totalProtocolFees += feeAmount;
+        }
+        // Check for rebates (negative fees)
+        if (event.rebates && event.rebates !== 0) {
+          const rebateAmount = Math.abs(toNum(event.rebates));
+          totalProtocolFees -= rebateAmount;
+        }
+      });
+
+      // Count actual trade fills in this transaction
+      const tradeFillEvents = decodedEvents.filter(
+        (e: any) => e.tag === 11 || e.tag === 19, // spotFillOrder (11) or perpFillOrder (19)
+      );
+
+      const feeDistribution = this.distributeFees(
+        tradeFillEvents,
+        networkFee,
+        totalProtocolFees,
+      );
 
       for (const event of decodedEvents) {
         const tag = event.tag;
@@ -612,7 +645,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Deposit ${(amount)} ${tokenSymbol}`,
+              notes: `Deposit ${amount} ${tokenSymbol}`,
               tradeType: "spot",
               logType: "deposit",
               discriminator: tag,
@@ -649,7 +682,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Withdraw ${(amount)} ${tokenSymbol}`,
+              notes: `Withdraw ${amount} ${tokenSymbol}`,
               tradeType: "spot",
               logType: "withdraw",
               discriminator: tag,
@@ -688,7 +721,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Perp Deposit ${(amount)} to ${symbol}`,
+              notes: `Perp Deposit ${amount} to ${symbol}`,
               tradeType: "perp",
               logType: "perpDeposit",
               discriminator: tag,
@@ -744,11 +777,22 @@ export class TransactionDataFetcher {
 
             const side = fill.side === 0 ? "buy" : "sell";
             const quantity = toNum(fill.qty);
-            // price is already human-readable (engine scales it)
             const price = toNum(fill.price);
-            // crncy here = USDC value of the fill
-            const value = toNum((fill as any).crncy);
+
+            // Calculate amount safely, handling undefined price
+            let amount = 0;
+            if (price && !isNaN(price) && price > 0) {
+              amount = quantity * price;
+            } else {
+              // Fallback to crncy field if price is invalid
+              amount = toNum((fill as any).crncy);
+            }
+
             const rebates = fill.rebates ? -toNum(fill.rebates) : 0;
+
+            const fillIndex = tradeFillEvents.indexOf(event);
+            const tradeFee = feeDistribution.get(fillIndex) || 0;
+
             console.log("SpotFillOrder:: ", event);
 
             tradeRecords.push({
@@ -758,21 +802,26 @@ export class TransactionDataFetcher {
               symbol,
               side: side as "buy" | "sell",
               instrument: symbol,
-              entryPrice: price,
-              exitPrice: price,
+              entryPrice: price || 0,
+              exitPrice: price || 0,
               quantity,
-              amount: quantity,
-              value: value || price * quantity,
+              amount,
+              value: amount,
               orderType: "market",
               clientId: toStr(fill.clientId) || "unknown",
               orderId: toStr(fill.orderId) || "unknown",
               transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: rebates, rebates },
-              pnl: 0, // computed by PnLCalculator after collection
+              fees: {
+                maker: 0,
+                taker: 0,
+                total: tradeFee,
+                rebates,
+              },
+              pnl: 0,
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `${side === "buy" ? "Bought" : "Sold"} ${quantity.toFixed(6)} ${symbol} @ ${price}`,
+              notes: `${side === "buy" ? "Bought" : "Sold"} ${quantity.toFixed(6)} ${symbol} @ ${price || 0}`,
               tradeType: "spot",
               logType: "spotFillOrder",
               discriminator: tag,
@@ -852,7 +901,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: feeAmount > 0 ? "loss" : "breakeven",
-              notes: `Trading Fees: ${(feeAmount)} SOL, Ref Payment: ${refPayment.toFixed(6)}`,
+              notes: `Trading Fees: ${feeAmount} USDC, Ref Payment: ${refPayment.toFixed(6)}`,
               tradeType: "spot",
               logType: "spotFees",
               discriminator: tag,
@@ -874,8 +923,21 @@ export class TransactionDataFetcher {
             const isLong = perpFill.side === 0;
             const quantity = toNum(perpFill.perps);
             const price = toNum(perpFill.price);
-            const crncyValue = toNum((perpFill as any).crncy);
+
+            // Calculate amount safely, handling undefined price
+            let amount = 0;
+            if (price && !isNaN(price) && price > 0) {
+              amount = quantity * price;
+            } else {
+              // Fallback to crncy field if price is invalid
+              amount = toNum((perpFill as any).crncy);
+            }
+
             const rebates = perpFill.rebates ? -toNum(perpFill.rebates) : 0;
+
+            const fillIndex = tradeFillEvents.indexOf(event);
+            const tradeFee = feeDistribution.get(fillIndex) || 0;
+
             console.log("PerpFillOrder:: ", event);
 
             tradeRecords.push({
@@ -885,21 +947,26 @@ export class TransactionDataFetcher {
               symbol,
               side: isLong ? "long" : "short",
               instrument: symbol,
-              entryPrice: price,
-              exitPrice: price,
+              entryPrice: price || 0,
+              exitPrice: price || 0,
               quantity,
-              amount: quantity,
-              value: crncyValue || price * quantity,
+              amount,
+              value: amount,
               orderType: "market",
               clientId: toStr(perpFill.clientId) || "unknown",
               orderId: toStr(perpFill.orderId) || "unknown",
               transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: rebates, rebates },
+              fees: {
+                maker: 0,
+                taker: 0,
+                total: tradeFee,
+                rebates,
+              },
               pnl: 0,
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `Perp ${isLong ? "Long" : "Short"} Fill — ${quantity.toFixed(6)} ${symbol} @ ${price}`,
+              notes: `Perp ${isLong ? "Long" : "Short"} Fill — ${quantity.toFixed(6)} ${symbol} @ ${price || 0}`,
               tradeType: "perp",
               logType: "perpFillOrder",
               discriminator: tag,
@@ -938,7 +1005,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: fundingValue > 0 ? "win" : "loss",
-              notes: `${fundingValue > 0 ? "Received" : "Paid"} Funding: ${(Math.abs(fundingValue))} SOL`,
+              notes: `${fundingValue > 0 ? "Received" : "Paid"} Funding: ${Math.abs(fundingValue)} USDC`,
               tradeType: "perp",
               fundingPayments: fundingValue,
               logType: "perpFunding",
@@ -974,7 +1041,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: feeAmount > 0 ? "loss" : "breakeven",
-              notes: `Perp Trading Fees: ${(feeAmount)} SOL`,
+              notes: `Perp Trading Fees: ${feeAmount} USDC`,
               tradeType: "perp",
               logType: "perpFees",
               discriminator: tag,
@@ -1012,7 +1079,7 @@ export class TransactionDataFetcher {
               pnlPercentage: 0,
               duration: 0,
               status: "loss",
-              notes: `Socialized Loss: ${(lossValue)} USDC`,
+              notes: `Socialized Loss: ${lossValue} USDC`,
               tradeType: "perp",
               socializedLoss: lossValue,
               logType: "perpSocLoss",
@@ -1081,6 +1148,46 @@ export class TransactionDataFetcher {
       );
       return tradeRecords;
     }
+  }
+
+  // Add to TransactionDataFetcher class
+
+  /**
+   * Distribute transaction fees fairly across multiple fills in the same transaction
+   */
+  private distributeFees(
+    fillEvents: any[],
+    networkFee: number,
+    protocolFees: number,
+  ): Map<number, number> {
+    const feeMap = new Map<number, number>();
+
+    if (fillEvents.length === 0) return feeMap;
+
+    // Distribute fees proportionally based on trade value
+    const totalValue = fillEvents.reduce((sum, event) => {
+      const price = toNum(event.price);
+      const qty = toNum(event.qty);
+      return sum + price * qty;
+    }, 0);
+
+    const totalFees = networkFee + protocolFees;
+
+    fillEvents.forEach((event, index) => {
+      const price = toNum(event.price);
+      const qty = toNum(event.qty);
+      const tradeValue = price * qty;
+
+      // Allocate fees proportionally to trade value
+      const tradeFee =
+        totalValue > 0
+          ? (tradeValue / totalValue) * totalFees
+          : totalFees / fillEvents.length;
+
+      feeMap.set(index, tradeFee);
+    });
+
+    return feeMap;
   }
 
   // ── instrument / token lookups ───────────────────────────────────────────

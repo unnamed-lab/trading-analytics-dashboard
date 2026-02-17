@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { useState, useMemo } from "react";
+import { useTradeAnalytics, useCalculatedPnL } from "@/hooks/use-trade-queries";
 import {
   AreaChart,
   Area,
@@ -10,36 +10,114 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  Cell,
 } from "recharts";
 
-const sampleData = [
-  { date: "Oct 1", pnl: 1000 },
-  { date: "Oct 4", pnl: 1200 },
-  { date: "Oct 6", pnl: 900 },
-  { date: "Oct 8", pnl: 1400 },
-  { date: "Oct 10", pnl: 2100 },
-  { date: "Oct 12", pnl: 2600 },
-  { date: "Oct 14", pnl: 2400 },
-  { date: "Oct 16", pnl: 3200 },
-  { date: "Oct 18", pnl: 3100 },
-  { date: "Oct 20", pnl: 3500 },
-  { date: "Oct 22", pnl: 3400 },
-  { date: "Oct 24", pnl: 4700 },
-];
-
-const buildDailyFrom = (data: { date: string; pnl: number }[]) =>
-  data.map((d, i) => ({ ...d, daily: i === 0 ? 0 : d.pnl - data[i - 1].pnl }));
+interface ChartDataPoint {
+  date: string;
+  timestamp: number;
+  pnl: number;
+  daily?: number;
+}
 
 const CumulativePnLChart = () => {
   const [mode, setMode] = useState<"line" | "bar">("line");
   const { data: analytics } = useTradeAnalytics();
+  const { data: pnlTrades } = useCalculatedPnL();
 
-  // Build chart data from analytics.dailyPnl if available
-  const chartData = analytics?.timing?.dailyPnl
-    ? Object.entries(analytics.timing.dailyPnl).map(([date, pnl]) => ({ date, pnl }))
-    : sampleData;
+  // Generate chart data from analytics timeSeries or calculate from trades
+  const chartData = useMemo((): ChartDataPoint[] => {
+    // First try to use analytics timeSeries data
+    if (analytics?.timeSeries && analytics.timeSeries.length > 0) {
+      return analytics.timeSeries.map((point) => ({
+        date: point.date,
+        timestamp: point.timestamp,
+        pnl: point.cumulativePnL,
+        daily: point.tradePnL,
+      }));
+    }
 
-  const barData = buildDailyFrom(chartData as { date: string; pnl: number }[]);
+    // Fallback: calculate from PnL trades
+    if (pnlTrades && pnlTrades.length > 0) {
+      let cumulative = 0;
+      const dailyMap = new Map<string, { cumulative: number; daily: number }>();
+
+      // Sort chronologically
+      const sorted = [...pnlTrades].sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+      );
+
+      sorted.forEach((trade) => {
+        const dateStr = trade.timestamp.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        });
+        cumulative += trade.pnl || 0;
+
+        if (!dailyMap.has(dateStr)) {
+          dailyMap.set(dateStr, { cumulative, daily: trade.pnl || 0 });
+        } else {
+          const existing = dailyMap.get(dateStr)!;
+          dailyMap.set(dateStr, {
+            cumulative,
+            daily: existing.daily + (trade.pnl || 0),
+          });
+        }
+      });
+
+      return Array.from(dailyMap.entries()).map(([date, values]) => ({
+        date,
+        timestamp:
+          sorted
+            .find(
+              (t) =>
+                t.timestamp.toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                }) === date,
+            )
+            ?.timestamp.getTime() || 0,
+        pnl: values.cumulative,
+        daily: values.daily,
+      }));
+    }
+
+    // Return empty array if no data
+    return [];
+  }, [analytics, pnlTrades]);
+
+  // Prepare bar chart data (daily PnL)
+  const barData = useMemo(() => {
+    return chartData.map((point) => ({
+      date: point.date,
+      daily: point.daily || 0,
+      pnl: point.pnl,
+    }));
+  }, [chartData]);
+
+  // Show loading or empty state
+  if (chartData.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-sm text-foreground">
+            Cumulative PnL
+          </h3>
+          <div className="flex rounded border border-border overflow-hidden">
+            <button className="px-3 py-1 text-xs font-medium bg-secondary text-foreground">
+              Line
+            </button>
+            <button className="px-3 py-1 text-xs font-medium text-muted-foreground">
+              Bar
+            </button>
+          </div>
+        </div>
+        <div className="h-72 flex items-center justify-center text-muted-foreground">
+          No PnL data available
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-4">
@@ -74,17 +152,28 @@ const CumulativePnLChart = () => {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           {mode === "line" ? (
-            <AreaChart data={chartData}>
+            <AreaChart
+              data={chartData}
+              margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
+            >
               <defs>
                 <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop
                     offset="5%"
-                    stopColor="hsl(187, 100%, 50%)"
+                    stopColor={
+                      chartData[chartData.length - 1]?.pnl >= 0
+                        ? "#10b981"
+                        : "#ef4444"
+                    }
                     stopOpacity={0.3}
                   />
                   <stop
                     offset="95%"
-                    stopColor="hsl(187, 100%, 50%)"
+                    stopColor={
+                      chartData[chartData.length - 1]?.pnl >= 0
+                        ? "#10b981"
+                        : "#ef4444"
+                    }
                     stopOpacity={0}
                   />
                 </linearGradient>
@@ -98,12 +187,13 @@ const CumulativePnLChart = () => {
                 tick={{ fill: "hsl(215, 15%, 50%)", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
+                interval="preserveStartEnd"
               />
               <YAxis
                 tick={{ fill: "hsl(215, 15%, 50%)", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={(v) => `$${v}`}
+                tickFormatter={(v) => `$${v.toLocaleString()}`}
               />
               <Tooltip
                 contentStyle={{
@@ -114,18 +204,33 @@ const CumulativePnLChart = () => {
                   fontFamily: "JetBrains Mono",
                   fontSize: 12,
                 }}
+                formatter={(value: number) => [`$${value.toFixed(2)}`, "PnL"]}
+                labelFormatter={(label) => `Date: ${label}`}
               />
               <Area
                 type="monotone"
                 dataKey="pnl"
-                stroke="hsl(187, 100%, 50%)"
+                stroke={
+                  chartData[chartData.length - 1]?.pnl >= 0
+                    ? "#10b981"
+                    : "#ef4444"
+                }
                 strokeWidth={2}
                 fill="url(#pnlGradient)"
-                dot={{ fill: "hsl(187, 100%, 50%)", r: 3 }}
+                dot={{
+                  fill:
+                    chartData[chartData.length - 1]?.pnl >= 0
+                      ? "#10b981"
+                      : "#ef4444",
+                  r: 3,
+                }}
               />
             </AreaChart>
           ) : (
-            <BarChart data={barData}>
+            <BarChart
+              data={barData}
+              margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
+            >
               <CartesianGrid
                 strokeDasharray="3 3"
                 stroke="hsl(222, 25%, 16%)"
@@ -140,7 +245,7 @@ const CumulativePnLChart = () => {
                 tick={{ fill: "hsl(215, 15%, 50%)", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={(v) => `$${v}`}
+                tickFormatter={(v) => `$${v.toLocaleString()}`}
               />
               <Tooltip
                 contentStyle={{
@@ -151,11 +256,55 @@ const CumulativePnLChart = () => {
                   fontFamily: "JetBrains Mono",
                   fontSize: 12,
                 }}
+                formatter={(value: number) => [
+                  `$${value.toFixed(2)}`,
+                  "Daily PnL",
+                ]}
+                labelFormatter={(label) => `Date: ${label}`}
               />
-              <Bar dataKey="daily" fill="hsl(187, 100%, 50%)" radius={[2, 2, 0, 0]} />
+              <Bar
+                dataKey="daily"
+                fill="hsl(187, 100%, 50%)"
+                radius={[2, 2, 0, 0]}
+              >
+                {barData.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={entry.daily >= 0 ? "#10b981" : "#ef4444"}
+                  />
+                ))}
+              </Bar>
             </BarChart>
           )}
         </ResponsiveContainer>
+      </div>
+
+      {/* Summary stats */}
+      <div className="flex justify-between text-xs text-muted-foreground border-t border-border pt-3">
+        <div>
+          <span className="block">Total PnL</span>
+          <span
+            className={`font-mono text-sm font-bold ${
+              chartData[chartData.length - 1]?.pnl >= 0
+                ? "text-profit"
+                : "text-loss"
+            }`}
+          >
+            ${chartData[chartData.length - 1]?.pnl.toFixed(2)}
+          </span>
+        </div>
+        <div className="text-right">
+          <span className="block">Best Day</span>
+          <span className="font-mono text-sm font-bold text-profit">
+            +${Math.max(...barData.map((d) => d.daily)).toFixed(2)}
+          </span>
+        </div>
+        <div className="text-right">
+          <span className="block">Worst Day</span>
+          <span className="font-mono text-sm font-bold text-loss">
+            ${Math.min(...barData.map((d) => d.daily)).toFixed(2)}
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -1,31 +1,7 @@
 import { X, Share2, CheckCircle, Sparkles } from "lucide-react";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  ResponsiveContainer,
-  ReferenceDot,
-} from "recharts";
 import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
 import formatBigNumber, { shortenHash } from "@/utils/number-format";
-
-const priceData = [
-  { time: "09:00", price: 140 },
-  { time: "09:15", price: 141 },
-  { time: "09:30", price: 139 },
-  { time: "09:45", price: 142.5 },
-  { time: "10:00", price: 144 },
-  { time: "10:15", price: 146 },
-  { time: "10:30", price: 148 },
-  { time: "10:45", price: 150 },
-  { time: "11:00", price: 153 },
-  { time: "11:15", price: 155 },
-  { time: "11:30", price: 157 },
-  { time: "11:45", price: 158 },
-  { time: "12:00", price: 160 },
-];
 
 interface TradeReviewPanelProps {
   trade: TradeRecord;
@@ -35,23 +11,18 @@ interface TradeReviewPanelProps {
 const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
   const isProfitable = trade.pnl >= 0;
   const bullish = isBullishSide(trade.side);
-  const durationMin = Math.round(trade.duration / 60);
-  const durationStr =
-    durationMin >= 60
-      ? `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`
-      : `${durationMin}m`;
 
   return (
     <div className="fixed inset-0 z-50 flex">
       <div
-        className="flex-1 bg-background backdrop-blur-sm"
+        className="flex-1 bg-background/60 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="w-full sm:w-105 lg:w-130 bg-card border-l border-border overflow-y-auto animate-slide-in-right flex flex-col">
+      <div className="w-full bg-background sm:w-105 lg:w-130 border-l border-border overflow-y-auto animate-slide-in-right flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div className="flex items-center gap-3">
-            <span className="font-mono text-xs text-muted-foreground">
+            <span className="font-mono truncate text-xs text-muted-foreground w-30">
               #{trade.id}
             </span>
             <span className="font-mono text-sm font-bold text-primary">
@@ -116,7 +87,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
           <h4 className="text-xs font-medium tracking-wider text-muted-foreground uppercase mb-3">
             Execution Data
           </h4>
-          <div className="grid grid-cols-2 gap-px bg-border rounded-lg overflow-hidden">
+          <div className="grid grid-cols-3 gap-px bg-border rounded-lg overflow-hidden">
             <div className="bg-card p-3">
               <span className="text-xs text-muted-foreground">Entry Price</span>
               <p className="font-mono text-sm text-primary mt-1">
@@ -138,76 +109,11 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                 {trade.symbol.split("/")[0]}
               </p>
             </div>
-            <div className="bg-card p-3">
-              <span className="text-xs text-muted-foreground">Duration</span>
-              <p className="font-mono text-sm text-primary mt-1">
-                {durationStr}
-              </p>
-            </div>
           </div>
         </div>
 
-        {/* Price Action Chart */}
-        {/* <div className="px-5">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
-              Price Action
-            </h4>
-            <span className="text-xs px-2 py-0.5 rounded border border-border text-muted-foreground">
-              15m TF
-            </span>
-          </div>
-          <div className="h-44 rounded-lg bg-secondary/30 border border-border p-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={priceData}>
-                <defs>
-                  <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop
-                      offset="5%"
-                      stopColor="hsl(187, 100%, 50%)"
-                      stopOpacity={0.2}
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor="hsl(187, 100%, 50%)"
-                      stopOpacity={0}
-                    />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="time" hide />
-                <YAxis hide domain={["dataMin - 2", "dataMax + 2"]} />
-                <Area
-                  type="monotone"
-                  dataKey="price"
-                  stroke="hsl(187, 100%, 50%)"
-                  strokeWidth={2}
-                  fill="url(#priceGrad)"
-                />
-                <ReferenceDot
-                  x="09:45"
-                  y={142.5}
-                  r={5}
-                  fill="hsl(187, 100%, 50%)"
-                  stroke="none"
-                />
-                <ReferenceDot
-                  x="12:00"
-                  y={160}
-                  r={5}
-                  fill="hsl(152, 69%, 50%)"
-                  stroke="none"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex justify-between mt-1.5 px-1">
-            <span className="text-xs text-primary font-mono">ENTRY</span>
-            <span className="text-xs text-profit font-mono">EXIT</span>
-          </div>
-        </div> */}
-
         {/* Risk Analysis */}
-        {/* <div className="p-5">
+        <div className="p-5">
           <h4 className="text-xs font-medium tracking-wider text-muted-foreground uppercase mb-3">
             Risk Analysis
           </h4>
@@ -226,7 +132,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
               },
               {
                 label: "ORDER TYPE",
-                value: trade.orderType.toUpperCase(),
+                value: trade.orderType?.toUpperCase(),
                 primary: true,
               },
             ].map((m) => (
@@ -251,7 +157,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
               </div>
             ))}
           </div>
-        </div> */}
+        </div>
 
         {/* AI Insight */}
         <div className="px-5 pb-5">
@@ -296,7 +202,8 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
             </p>
             <p>
               <span className="text-muted-foreground/70">Type:</span>{" "}
-              {trade.tradeType?.toUpperCase()} • {trade.orderType}
+              {trade.tradeType?.toUpperCase()} •{" "}
+              {trade.orderType?.toUpperCase()}
             </p>
           </div>
         </div>

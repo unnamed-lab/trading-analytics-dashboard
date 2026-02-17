@@ -128,15 +128,8 @@ const TradeHistory = () => {
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
                       {trade?.amount || 0}
                     </td>
-                    {/* <td
-                      className={`px-5 py-3.5 font-mono text-sm font-medium ${
-                        trade.pnl >= 0 ? "text-profit" : "text-loss"
-                      }`}
-                    >
-                      {formatPnl(trade.pnl)}
-                    </td> */}
                     <td
-                      className="px-5 py-3.5 text-sm text-muted-foreground max-w-[14rem] truncate"
+                      className="px-5 py-3.5 text-sm text-muted-foreground max-w-56 truncate"
                       title={trade.notes}
                     >
                       {trade.notes}

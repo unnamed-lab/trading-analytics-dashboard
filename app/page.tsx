@@ -12,7 +12,7 @@ import TradeHistory from "@/components/dashboard/trade-history";
 export default function HomePage() {
   return (
     <>
-      <FilterBar />
+      {/* <FilterBar /> */}
       <div className="px-4 sm:px-6 pb-8 flex flex-col gap-4 sm:gap-5">
         <KPIRow />
 

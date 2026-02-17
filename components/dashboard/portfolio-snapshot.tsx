@@ -145,10 +145,18 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
             </span>
             <span
               className={`text-xs ${
-                portfolioData.isProfitableToday ? "text-profit" : "text-loss"
+                portfolioData.todayPnL !== 0
+                  ? portfolioData.isProfitableToday
+                    ? "text-profit"
+                    : "text-loss"
+                  : "text-muted-foreground"
               }`}
             >
-              {portfolioData.isProfitableToday ? "+" : "-"}
+              {portfolioData.todayPnL !== 0
+                ? portfolioData.isProfitableToday
+                  ? "+"
+                  : "-"
+                : ""}
               {Math.abs(portfolioData.todayPnlPercentage).toFixed(2)}%
               {portfolioData.yesterdayPnL !== 0 && (
                 <span className="text-muted-foreground ml-1">

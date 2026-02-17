@@ -24,7 +24,7 @@ const AIInsights = ({
   const { data: pnlTrades } = useCalculatedPnL();
 
   // Get recent trades for context
-  const recentTrades = pnlTrades?.slice(0, 10) || [];
+  const recentTrades = pnlTrades?.slice(0, 20) || [];
 
   // Batch fetch AI reviews for recent trades
   const {

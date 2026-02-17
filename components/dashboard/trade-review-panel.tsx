@@ -1,7 +1,19 @@
-import { X, Share2, CheckCircle, Sparkles } from "lucide-react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+"use client";
+
+import {
+  X,
+  Share2,
+  CheckCircle,
+  Sparkles,
+  RefreshCw,
+  Loader2,
+} from "lucide-react";
 import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
 import formatBigNumber, { shortenHash } from "@/utils/number-format";
+import { useAITradeReview, useGenerateAIReview } from "@/hooks/use-ai-review";
+import { useState } from "react";
 
 interface TradeReviewPanelProps {
   trade: TradeRecord;
@@ -11,6 +23,30 @@ interface TradeReviewPanelProps {
 const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
   const isProfitable = trade.pnl >= 0;
   const bullish = isBullishSide(trade.side);
+  const {
+    data: aiReview,
+    isLoading: aiLoading,
+    refetch: refetchReview,
+  } = useAITradeReview(trade, !!trade);
+
+  const generateReview = useGenerateAIReview();
+  const [regenerating, setRegenerating] = useState(false);
+
+  // cached review info (client-only)
+  let cachedMinutes: number | null = null;
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = localStorage.getItem(`ai-review:${trade.id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { timestamp: number; data: any };
+        if (parsed?.timestamp) {
+          cachedMinutes = Math.round((Date.now() - parsed.timestamp) / 60000);
+        }
+      }
+    }
+  } catch (e) {
+    cachedMinutes = null;
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -168,26 +204,71 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                 Deriverse AI Insight
               </span>
             </div>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {isProfitable ? (
-                <>
-                  <span className="text-profit font-medium">
-                    Entry was optimal
-                  </span>
-                  . You entered at a strong support level. The exit captured{" "}
-                  {trade.pnlPercentage.toFixed(1)}% of the move on{" "}
-                  {trade.symbol}.
-                </>
-              ) : (
-                <>
-                  <span className="text-loss font-medium">Review needed</span>.
-                  The {formatSide(trade.side).toLowerCase()} entry at{" "}
-                  {formatPrice(trade.entryPrice)} resulted in a{" "}
-                  {Math.abs(trade.pnlPercentage).toFixed(1)}% loss. Consider
-                  waiting for confirmation before entering.
-                </>
-              )}
-            </p>
+            <div className="flex flex-col items-start justify-between gap-3">
+              <div className="flex-1">
+                {aiLoading || regenerating ? (
+                  <div className="space-y-3 animate-pulse">
+                    <div className="h-4 w-1/3 bg-muted-foreground/10 rounded" />
+                    <div className="h-3 w-full bg-muted-foreground/8 rounded" />
+                    <div className="h-3 w-5/6 bg-muted-foreground/8 rounded" />
+                    <div className="h-3 w-3/4 bg-muted-foreground/8 rounded" />
+                  </div>
+                ) : aiReview ? (
+                  <div className="flex-col">
+                    <p className="text-xs text-muted-foreground leading-relaxed mb-2">
+                      {aiReview.performanceCritique}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed mb-2">
+                      {aiReview.emotionalReview}
+                    </p>
+                    <div className="text-xs text-foreground">
+                      <strong>Actionable:</strong>
+                      <ul className="list-disc list-inside mt-2">
+                        {aiReview.actionableInsights.slice(0, 5).map((a, i) => (
+                          <li key={i} className="mt-1">
+                            {a}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No AI review available.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex-shrink-0 flex  items-end gap-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      setRegenerating(true);
+                      await generateReview.mutateAsync({
+                        trade,
+                        journalContent:
+                          trade.notes || "No journal entry provided",
+                        context: { recentTrades: [] },
+                      });
+                      refetchReview();
+                    } finally {
+                      setRegenerating(false);
+                    }
+                  }}
+                  className="flex items-center gap-2 rounded px-3 py-1 text-xs border border-border bg-secondary/5 hover:bg-secondary"
+                >
+                  <RefreshCw className="h-3 w-3" /> Regenerate
+                </button>
+                <div className="text-[10px] text-muted-foreground/60 italic text-right">
+                  <div>{aiReview?.disclaimer || "Not financial advice."}</div>
+                  {cachedMinutes !== null && (
+                    <div className="text-[10px] text-muted-foreground/50 mt-1">
+                      Cached {cachedMinutes}m ago
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

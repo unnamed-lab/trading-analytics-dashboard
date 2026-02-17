@@ -146,6 +146,13 @@ Provide a comprehensive analysis in the following JSON format:
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
     try {
+      // If no API key is configured, skip calling OpenAI and return a mock analysis.
+      if (!process.env.OPENAI_API_KEY) {
+        clearTimeout(timeoutId);
+        const mock = generateMockAnalysis(trade, journalContent);
+        return NextResponse.json(mock);
+      }
+
       const completion = await openai.chat.completions.create(
         {
           model: process.env.OPENAI_API_MODEL || "gpt-4o",

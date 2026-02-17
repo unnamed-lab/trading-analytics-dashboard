@@ -21,7 +21,7 @@ import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
 import TradeReviewPanel from "@/components/dashboard/trade-review-panel";
 import { getJournalStatus } from "@/data/mockTrades";
 
-const ITEMS_PER_PAGE = 7;
+const ITEMS_PER_PAGE = 20;
 const periods = ["All", "7D", "30D"];
 
 const TradeHistoryPage = () => {

@@ -36,32 +36,36 @@ export class PnLCalculator {
       const positions = openPositions.get(symbol)!;
 
       if (isEntry) {
-        // This is an entry trade - add to open positions
+        // Add entry to open positions
         positions.push(trade);
         remainingQtyMap.set(trade.id, trade.quantity);
         result.push(trade);
       } else {
-        // This is an exit trade - match with open positions (FIFO)
+        // Exit trade: match with open positions (FIFO) and allocate fees
         let remainingExitQty = trade.quantity;
         let totalPnl = 0;
-        let totalValue = 0;
+        let totalExitValue = 0;
 
         while (remainingExitQty > 0 && positions.length > 0) {
           const entry = positions[0];
-          const entryRemainingQty =
-            remainingQtyMap.get(entry.id) || entry.quantity;
+          const entryRemainingQty = remainingQtyMap.get(entry.id) || entry.quantity;
           const matchedQty = Math.min(entryRemainingQty, remainingExitQty);
 
-          // Calculate PnL for this matched quantity
-          const entryValue = matchedQty * entry.entryPrice;
-          const exitValue = matchedQty * trade.entryPrice;
-          const pnl =
-            trade.side === "sell"
-              ? exitValue - entryValue
-              : entryValue - exitValue;
+          const entryPrice = entry.entryPrice;
+          const exitPrice = trade.exitPrice || trade.entryPrice || 0;
+
+          const entryValue = matchedQty * entryPrice;
+          const exitValue = matchedQty * exitPrice;
+
+          // allocate proportional fees from entry and exit
+          const entryFee = (entry.fees?.total || 0) * (matchedQty / (entry.quantity || 1));
+          const exitFee = (trade.fees?.total || 0) * (matchedQty / (trade.quantity || 1));
+
+          // PnL: exit - entry - fees (for a sell exiting a long)
+          const pnl = (trade.side === "sell") ? exitValue - entryValue - entryFee - exitFee : entryValue - exitValue - entryFee - exitFee;
 
           totalPnl += pnl;
-          totalValue += exitValue;
+          totalExitValue += exitValue;
 
           // Update remaining quantities
           const newRemainingQty = entryRemainingQty - matchedQty;
@@ -75,28 +79,35 @@ export class PnLCalculator {
           }
         }
 
-        // Create the exit trade with calculated PnL
-        const pnlStatus: "win" | "loss" | "breakeven" =
-          totalPnl > 0 ? "win" : totalPnl < 0 ? "loss" : "breakeven";
+        const pnlStatus: "win" | "loss" | "breakeven" = totalPnl > 0 ? "win" : totalPnl < 0 ? "loss" : "breakeven";
+
         const exitTrade: TradeRecord = {
           ...trade,
           pnl: totalPnl,
-          pnlPercentage: totalValue > 0 ? (totalPnl / totalValue) * 100 : 0,
+          pnlPercentage: totalExitValue > 0 ? (totalPnl / totalExitValue) * 100 : 0,
           status: pnlStatus,
         };
 
         result.push(exitTrade);
 
-        // If there's unmatched exit quantity, it might be a short sale
         if (remainingExitQty > 0) {
-          console.log(
-            `⚠️ Unmatched exit quantity for ${symbol}: ${remainingExitQty}`,
-          );
+          console.log(`⚠️ Unmatched exit quantity for ${symbol}: ${remainingExitQty}`);
         }
       }
     }
 
     return result;
+  }
+
+  /**
+   * Return a quick net summary including fees and funding
+   */
+  calculatePnLSummary(): { totalPnL: number; totalFees: number; netPnL: number } {
+    const detailed = this.calculatePnL();
+    const totalPnL = detailed.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const totalFees = this.trades.reduce((sum, t) => sum + (t.fees?.total || 0), 0);
+    const totalFunding = this.trades.reduce((sum, t) => sum + (t.fundingPayments || 0), 0);
+    return { totalPnL, totalFees, netPnL: totalPnL - totalFees + totalFunding };
   }
 
   /**

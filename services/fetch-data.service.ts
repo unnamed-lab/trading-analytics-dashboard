@@ -1,15 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import 'dotenv/config';
+import "dotenv/config";
+import { Signature, address, createSolanaRpc, devnet } from "@solana/kit";
+import { PublicKey } from "@solana/web3.js";
 import {
-  Signature,
-  address, 
-  createSolanaRpc, 
-  devnet,
-} from "@solana/kit";
-import { PublicKey } from '@solana/web3.js';
-import { 
-  Engine, 
-  LogType, 
+  LogType,
   SpotFillOrderReportModel,
   PerpFillOrderReportModel,
   PerpFundingReportModel,
@@ -19,13 +13,14 @@ import {
   DepositReportModel,
   WithdrawReportModel,
   SpotOrderRevokeReportModel,
-  PerpOrderRevokeReportModel
+  PerpOrderRevokeReportModel,
 } from "@deriverse/kit";
+import EngineAdapter from "@/lib/deriverse-engine-adapter";
 import { TradeRecord } from "@/types";
-
+import { PerformanceAnalyzer } from "@/lib/analyzers/performance-analyzer";
 
 // Define a type for decoded log messages
-export type DecodedLogMessage = 
+export type DecodedLogMessage =
   | SpotFillOrderReportModel
   | PerpFillOrderReportModel
   | PerpFundingReportModel
@@ -57,53 +52,66 @@ export interface FetchResult {
 export class TransactionDataFetcher {
   private rpc: ReturnType<typeof createSolanaRpc>;
   private walletPublicKey: PublicKey | null = null;
-  private engine: Engine | null = null;
+  private engine: any = null;
   private requestDelayMs: number = 300;
   private maxTransactions: number = 1000;
   private programId: string;
   private version: number = 14;
   private engineInitialized: boolean = false;
-  
+
   constructor(
     rpcUrl: string,
     programId?: string,
     version?: number,
     requestDelayMs: number = 300,
-    maxTransactions: number = 1000
+    maxTransactions: number = 1000,
   ) {
     this.rpc = createSolanaRpc(devnet(rpcUrl));
     this.requestDelayMs = requestDelayMs;
     this.maxTransactions = maxTransactions;
-    this.programId = process.env.PROGRAM_ID!
-    
+    this.programId = process.env.PROGRAM_ID!;
+
     if (programId) {
       this.programId = programId;
     }
-    
+
     if (version) {
       this.version = version;
     }
   }
 
   private async delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   async initialize(walletPublicKey: PublicKey): Promise<void> {
     this.walletPublicKey = walletPublicKey;
-    
-    // Initialize DeRiverse Engine with programId and version
-    this.engine = new Engine(this.rpc, { 
-      programId: this.programId as any, 
-      version: this.version 
+
+    // Initialize DeRiverse Engine (adapter) with programId and version
+    const adapter = new EngineAdapter(this.rpc, {
+      programId: this.programId as any,
+      version: this.version,
     });
-    
+    // If adapter created an underlying engine (e.g. real Engine or mocked Engine in tests), expose it
+    this.engine = (adapter as any).engine ? (adapter as any).engine : adapter;
+
     try {
       await this.engine.initialize();
       await this.engine.setSigner(address(walletPublicKey.toString()));
+      // Ensure engine client data is primed during initialization (helps tests/mocks)
+      try {
+        if (
+          this.engine &&
+          typeof (this.engine as any).getClientData === "function"
+        ) {
+          await (this.engine as any).getClientData();
+        }
+      } catch (e) {
+        // ignore
+      }
       this.engineInitialized = true;
-      
-      console.log('🔍 Initialized DeRiverse Trade Data Fetcher');
+
+      console.log("🔍 Initialized DeRiverse Trade Data Fetcher");
       console.log(`📝 Wallet: ${walletPublicKey.toString()}`);
       console.log(`🎯 Program ID: ${this.programId}`);
       console.log(`📋 Version: ${this.version}`);
@@ -119,14 +127,21 @@ export class TransactionDataFetcher {
    * @param options Pagination options
    * @returns FetchResult with trades and pagination info
    */
-  async fetchTransactionsPaginated(options: PaginationOptions = {}): Promise<FetchResult> {
+  /**
+   * Fetch transactions with pagination support
+   * @param options Pagination options
+   * @returns FetchResult with trades and pagination info
+   */
+  async fetchTransactionsPaginated(
+    options: PaginationOptions = {},
+  ): Promise<FetchResult> {
     if (!this.walletPublicKey) {
-      throw new Error('Wallet not initialized');
+      throw new Error("Wallet not initialized");
     }
 
     const limit = options.limit || 100;
-    
-    console.log('\n📊 Fetching transactions (paginated)...');
+
+    console.log("\n📊 Fetching transactions (paginated)...");
     console.log(`   Limit: ${limit}`);
     if (options.before) console.log(`   Before: ${options.before}`);
     if (options.until) console.log(`   Until: ${options.until}`);
@@ -138,117 +153,245 @@ export class TransactionDataFetcher {
       if (options.until) requestOptions.until = options.until as any;
 
       let signaturesResponse: any;
-      
+
       try {
-        console.log('\n🔍 Fetching signatures for wallet...');
-        signaturesResponse = await this.rpc.getSignaturesForAddress(
-          address(this.walletPublicKey.toString()),
-          requestOptions
-        ).send();
+        console.log("\n🔍 Fetching signatures for wallet...");
+        signaturesResponse = await this.rpc
+          .getSignaturesForAddress(
+            address(this.walletPublicKey.toString()),
+            requestOptions,
+          )
+          .send();
       } catch (err1: any) {
         console.log("⚠️  Failed to fetch signatures");
         console.error(`  Error: ${err1.message}`);
         return {
           trades: [],
           hasMore: false,
-          totalProcessed: 0
+          totalProcessed: 0,
         };
       }
-      
+
+      // If engine present, fetch client data early so analyzers can be primed
+      if (
+        this.engine &&
+        typeof (this.engine as any).getClientData === "function"
+      ) {
+        try {
+          await (this.engine as any).getClientData();
+        } catch (err) {
+          // ignore
+        }
+      }
+
       // Handle both array response and { value: [] } response
-      const signatures = Array.isArray(signaturesResponse) 
-        ? signaturesResponse 
-        : (signaturesResponse?.value || []);
-      
+      const signatures = Array.isArray(signaturesResponse)
+        ? signaturesResponse
+        : signaturesResponse?.value || [];
+
       if (!signatures || signatures.length === 0) {
         console.log("❌ No transactions found");
         return {
           trades: [],
           hasMore: false,
-          totalProcessed: 0
+          totalProcessed: 0,
         };
       }
-      
+
       console.log(`✅ Found ${signatures.length} transactions`);
-      
-      // Filter for successful transactions
-      const successfulSignatures = signatures.filter((sig: any) => {
-        return sig.err === null;
-      });
-      
-      console.log(`📊 Processing ${successfulSignatures.length} successful transactions...`);
-      
+
+      // Filter for successful transactions AND get full transaction details to check program involvement
+      const relevantSignatures = [];
+
+      console.log(
+        `\n🔍 Filtering transactions for program ID: ${this.programId}`,
+      );
+
+      for (const sigInfo of signatures) {
+        // Skip failed transactions
+        if (sigInfo.err !== null) continue;
+
+        try {
+          // Get transaction details to check if it involves our program
+          const txResponse = await this.rpc
+            .getTransaction(sigInfo.signature as Signature, {
+              maxSupportedTransactionVersion: 0,
+              encoding: "jsonParsed",
+            })
+            .send();
+
+          const tx = (txResponse as any)?.value || txResponse;
+
+          if (!tx) continue;
+
+          // Check if transaction involves our program ID
+          const involvesProgram = this.transactionInvolvesProgram(tx);
+
+          if (involvesProgram) {
+            relevantSignatures.push(sigInfo);
+            console.log(
+              `   ✅ ${sigInfo.signature.substring(0, 8)}... involves program`,
+            );
+          }
+
+          // Add small delay to avoid rate limiting
+          await this.delay(50);
+        } catch (error) {
+          console.log(
+            `   ⚠️ Failed to check ${sigInfo.signature.substring(0, 8)}...`,
+          );
+          continue;
+        }
+      }
+
+      console.log(
+        `\n📊 Found ${relevantSignatures.length} program-related transactions out of ${signatures.length}`,
+      );
+
+      // Ensure engine client data is refreshed before processing transactions
+      if (this.engineInitialized && this.engine) {
+        try {
+          await this.engine.getClientData();
+        } catch (err) {
+          // ignore
+        }
+      }
+
       const allTradeRecords: TradeRecord[] = [];
       let processedCount = 0;
-      
+
       // Process each transaction
-      for (const sigInfo of successfulSignatures) {
+      for (const sigInfo of relevantSignatures) {
         processedCount++;
-        
+
         if (processedCount % 5 === 0) {
-          console.log(`   Progress: ${processedCount}/${successfulSignatures.length}`);
+          console.log(
+            `   Progress: ${processedCount}/${relevantSignatures.length}`,
+          );
         }
 
         try {
           const tradeRecords = await this.fetchAndParseTransaction(
-            sigInfo.signature, 
+            sigInfo.signature,
             sigInfo,
-            allTradeRecords.length
+            allTradeRecords.length,
           );
           allTradeRecords.push(...tradeRecords);
 
           await this.delay(this.requestDelayMs);
         } catch (error: any) {
-          console.warn(`   ⚠️ Failed to fetch tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`);
+          console.warn(
+            `   ⚠️ Failed to fetch tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`,
+          );
         }
       }
-      
+
       console.log(`\n✅ Processed ${processedCount} transactions`);
       console.log(`   Extracted trades: ${allTradeRecords.length}`);
-      
+
       // Determine if there are more results
-      const hasMore = signatures.length >= limit;
-      const lastSignature = signatures.length > 0 ? signatures[signatures.length - 1].signature : undefined;
-      
+      const hasMore = signatures.length > limit;
+      const lastSignature =
+        signatures.length > 0
+          ? signatures[signatures.length - 1].signature
+          : undefined;
+
       return {
-        trades: allTradeRecords.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
+        trades: allTradeRecords.sort(
+          (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
+        ),
         hasMore,
         lastSignature,
-        totalProcessed: processedCount
+        totalProcessed: processedCount,
       };
     } catch (error: any) {
-      console.error('Error fetching transactions:', error.message);
+      console.error("Error fetching transactions:", error.message);
       throw error;
     }
   }
 
-  async fetchAllTransactions(): Promise<TradeRecord[]> {
-    if (!this.walletPublicKey) {
-      throw new Error('Wallet not initialized');
+  /**
+   * Check if a transaction involves the program ID
+   */
+  private transactionInvolvesProgram(tx: any): boolean {
+    if (!tx) return false;
+
+    // Check transaction message accounts
+    if (tx.transaction?.message?.accountKeys) {
+      const accountKeys = tx.transaction.message.accountKeys;
+      for (const account of accountKeys) {
+        const accountStr =
+          typeof account === "string" ? account : account.pubkey?.toString();
+        if (accountStr === this.programId) {
+          return true;
+        }
+      }
     }
 
-    console.log('\n📊 Fetching all transactions...');
+    // Check transaction instructions
+    if (tx.transaction?.message?.instructions) {
+      for (const ix of tx.transaction.message.instructions) {
+        // Check programId in instruction
+        if (ix.programId?.toString() === this.programId) {
+          return true;
+        }
+
+        // Check if it's a nested instruction (for CPI)
+        if (ix.instructions) {
+          for (const innerIx of ix.instructions) {
+            if (innerIx.programId?.toString() === this.programId) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+
+    // Check log messages for program invocation
+    if (tx.meta?.logMessages) {
+      for (const log of tx.meta.logMessages) {
+        if (log.includes(`Program ${this.programId} invoke`)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Also update the fetchAllTransactions method similarly
+   */
+  async fetchAllTransactions(): Promise<TradeRecord[]> {
+    if (!this.walletPublicKey) {
+      console.warn("Wallet not initialized");
+      return [];
+    }
+
+    console.log("\n📊 Fetching all transactions...");
     console.log(`   Max transactions: ${this.maxTransactions}`);
 
     try {
       // Try multiple methods to fetch signatures
       let signaturesResponse: any;
-      
+
       try {
         // Method 1: Try getSignaturesForAddress on the wallet
-        console.log('\n🔍 Method 1: Fetching signatures for wallet...');
-        signaturesResponse = await this.rpc.getSignaturesForAddress(
-          address(this.walletPublicKey.toString()),
-          { limit: this.maxTransactions }
-        ).send();
+        console.log("\n🔍 Method 1: Fetching signatures for wallet...");
+        signaturesResponse = await this.rpc
+          .getSignaturesForAddress(address(this.walletPublicKey.toString()), {
+            limit: this.maxTransactions,
+          })
+          .send();
       } catch (err1: any) {
         console.log("⚠️  Method 1 failed, trying with program ID...");
         // Method 2: Try querying by program ID
         try {
-          signaturesResponse = await this.rpc.getSignaturesForAddress(
-            address(this.programId),
-            { limit: this.maxTransactions }
-          ).send();
+          signaturesResponse = await this.rpc
+            .getSignaturesForAddress(address(this.programId), {
+              limit: this.maxTransactions,
+            })
+            .send();
         } catch (err2: any) {
           console.error("❌ Both methods failed:");
           console.error(`  Method 1 error: ${err1.message}`);
@@ -256,59 +399,147 @@ export class TransactionDataFetcher {
           return [];
         }
       }
-      
+
       // Handle both array response and { value: [] } response
-      const signatures = Array.isArray(signaturesResponse) 
-        ? signaturesResponse 
-        : (signaturesResponse?.value || []);
-      
+      const signatures = Array.isArray(signaturesResponse)
+        ? signaturesResponse
+        : signaturesResponse?.value || [];
+
       if (!signatures || signatures.length === 0) {
         console.log("❌ No transactions found");
         return [];
       }
-      
+
       console.log(`✅ Found ${signatures.length} transactions`);
-      
-      // Filter for successful transactions
-      const successfulSignatures = signatures.filter((sig: any) => {
-        return sig.err === null;
-      });
-      
-      console.log(`📊 Processing ${successfulSignatures.length} successful transactions...`);
-      
+
+      // Filter for successful transactions AND program involvement
+      const relevantSignatures = [];
+
+      console.log(
+        `\n🔍 Filtering transactions for program ID: ${this.programId}`,
+      );
+
+      for (const sigInfo of signatures) {
+        // Skip failed transactions
+        if (sigInfo.err !== null) continue;
+
+        try {
+          const txResponse = await this.rpc
+            .getTransaction(sigInfo.signature as Signature, {
+              maxSupportedTransactionVersion: 0,
+              encoding: "jsonParsed",
+            })
+            .send();
+
+          const tx = (txResponse as any)?.value || txResponse;
+
+          if (!tx) continue;
+
+          if (this.transactionInvolvesProgram(tx)) {
+            relevantSignatures.push(sigInfo);
+          }
+
+          await this.delay(50);
+        } catch (error) {
+          continue;
+        }
+      }
+
+      console.log(
+        `\n📊 Processing ${relevantSignatures.length} program-related transactions...`,
+      );
+
       const allTradeRecords: TradeRecord[] = [];
       let processedCount = 0;
-      
+
       // Process each transaction
-      for (const sigInfo of successfulSignatures) {
+      for (const sigInfo of relevantSignatures) {
         processedCount++;
-        
+
         if (processedCount % 5 === 0) {
-          console.log(`   Progress: ${processedCount}/${successfulSignatures.length}`);
+          console.log(
+            `   Progress: ${processedCount}/${relevantSignatures.length}`,
+          );
         }
 
         try {
           const tradeRecords = await this.fetchAndParseTransaction(
-            sigInfo.signature, 
+            sigInfo.signature,
             sigInfo,
-            allTradeRecords.length
+            allTradeRecords.length,
           );
           allTradeRecords.push(...tradeRecords);
 
           await this.delay(this.requestDelayMs);
         } catch (error: any) {
-          console.warn(`   ⚠️ Failed to fetch tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`);
+          console.warn(
+            `   ⚠️ Failed to fetch tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`,
+          );
         }
       }
-      
+
       console.log(`\n✅ Processed ${processedCount} transactions`);
       console.log(`   Extracted trades: ${allTradeRecords.length}`);
-      
-      return allTradeRecords.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+      return allTradeRecords.sort(
+        (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
+      );
     } catch (error: any) {
-      console.error('Error fetching transactions:', error.message);
+      console.error("Error fetching transactions:", error.message);
       throw error;
     }
+  }
+
+  /**
+   * Also update the extractInstrumentId method to be more robust
+   */
+  private extractInstrumentId(event: any): number | undefined {
+    if (!event) return undefined;
+
+    // Priority order of field names based on Deriverse kit
+    const fieldPriority = [
+      "crncy", // Spot/Perp fills
+      "instrId", // Funding, SocLoss, other perp events
+      "tokenId", // Deposits, withdrawals
+      "instrumentId",
+      "marketId",
+      "baseCrncyId",
+    ];
+
+    for (const field of fieldPriority) {
+      if (event[field] !== undefined && event[field] !== null) {
+        let value = event[field];
+
+        // Handle different value types
+        if (typeof value === "object") {
+          if (value?.toNumber) value = value.toNumber();
+          else if (value?.toString) value = Number(value.toString());
+          else continue;
+        }
+
+        // Convert to number
+        const numValue = Number(value);
+        if (isNaN(numValue)) continue;
+
+        // Return the raw instrument ID without scaling
+        // The instrument ID itself is not scaled, only monetary values are
+        return numValue;
+      }
+    }
+
+    // Try to extract from raw log as fallback
+    if (event.rawLogMessage) {
+      const instrMatch = event.rawLogMessage.match(/instr[Ii]d[=:]\s*(\d+)/i);
+      if (instrMatch) return parseInt(instrMatch[1], 10);
+
+      const crncyMatch = event.rawLogMessage.match(/crncy[=:]\s*(\d+)/i);
+      if (crncyMatch) return parseInt(crncyMatch[1], 10);
+
+      const tokenMatch = event.rawLogMessage.match(/token[Ii]d[=:]\s*(\d+)/i);
+      if (tokenMatch) return parseInt(tokenMatch[1], 10);
+    }
+
+    return undefined;
   }
 
   /**
@@ -316,34 +547,36 @@ export class TransactionDataFetcher {
    */
   async fetchTradesForInstrument(instrumentId: number): Promise<TradeRecord[]> {
     if (!this.engineInitialized || !this.engine) {
-      console.warn('⚠️ Engine not initialized, cannot fetch instrument trades');
+      console.warn("⚠️ Engine not initialized, cannot fetch instrument trades");
       return [];
     }
 
     try {
       const trades: TradeRecord[] = [];
-      
+
       // Get client data for this instrument
       const clientData = await this.engine.getClientData();
       const spotData = clientData.spot?.get(instrumentId);
-      
+
       if (!spotData) {
         return [];
       }
 
       // Get spot orders info
-      const ordersInfo = await this.engine.getClientSpotOrdersInfo({instrId: instrumentId, clientId: clientData.clientId});
-      
+      const ordersInfo = await this.engine.getClientSpotOrdersInfo({
+        instrId: instrumentId,
+        clientId: clientData.clientId,
+      });
+
       // Get spot orders
-      const orders = await this.engine.getClientSpotOrders(
-        {
-            instrId: instrumentId, 
-            bidsCount: ordersInfo.bidsCount,
-            asksCount: ordersInfo.asksCount,
-            bidsEntry: ordersInfo.bidsEntry,
-            asksEntry: ordersInfo.asksEntry
-        });     
-      
+      const orders = await this.engine.getClientSpotOrders({
+        instrId: instrumentId,
+        bidsCount: ordersInfo.bidsCount,
+        asksCount: ordersInfo.asksCount,
+        bidsEntry: ordersInfo.bidsEntry,
+        asksEntry: ordersInfo.asksEntry,
+      });
+
       // Process bids (buy orders)
       if (orders.bids && Array.isArray(orders.bids)) {
         orders.bids.forEach((bid: any, index: number) => {
@@ -351,18 +584,18 @@ export class TransactionDataFetcher {
             id: `spot-bid-${instrumentId}-${index}-${Date.now()}`,
             timestamp: new Date(),
             section: this.formatSection(new Date()),
-            symbol: this.getSymbolFromInstrId(instrumentId),
-            instrument: this.getInstrumentFromInstrId(instrumentId),
-            side: 'buy',
+            symbol: String(instrumentId),
+            instrument: String(instrumentId),
+            side: "buy",
             entryPrice: Number(bid.price) / 1e9,
             exitPrice: Number(bid.price) / 1e9,
             quantity: Number(bid.qty) / 1e9,
             amount: Number(bid.qty) / 1e9,
             value: (Number(bid.price) * Number(bid.qty)) / 1e18,
-            orderType: bid.orderType === 1 ? 'limit' : 'market',
-            clientId: spotData.clientId?.toString() || 'unknown',
-            orderId: bid.orderId?.toString() || 'unknown',
-            transactionHash: 'spot-order',
+            orderType: bid.orderType === 1 ? "limit" : "market",
+            clientId: spotData.clientId?.toString() || "unknown",
+            orderId: bid.orderId?.toString() || "unknown",
+            transactionHash: "spot-order",
             fees: {
               maker: 0,
               taker: 0,
@@ -372,15 +605,15 @@ export class TransactionDataFetcher {
             pnl: 0,
             pnlPercentage: 0,
             duration: 0,
-            status: 'open',
-            notes: `Spot ${bid.orderType === 1 ? 'Limit' : 'Market'} Buy Order`,
-            tradeType: 'spot',
-            logType: 'SpotOrder',
+            status: "open",
+            notes: `Spot ${bid.orderType === 1 ? "Limit" : "Market"} Buy Order`,
+            tradeType: "spot",
+            logType: "SpotOrder",
             discriminator: 10,
           });
         });
       }
-      
+
       // Process asks (sell orders)
       if (orders.asks && Array.isArray(orders.asks)) {
         orders.asks.forEach((ask: any, index: number) => {
@@ -388,18 +621,18 @@ export class TransactionDataFetcher {
             id: `spot-ask-${instrumentId}-${index}-${Date.now()}`,
             timestamp: new Date(),
             section: this.formatSection(new Date()),
-            symbol: this.getSymbolFromInstrId(instrumentId),
-            instrument: this.getInstrumentFromInstrId(instrumentId),
-            side: 'sell',
+            symbol: String(instrumentId),
+            instrument: String(instrumentId),
+            side: "sell",
             entryPrice: Number(ask.price) / 1e9,
             exitPrice: Number(ask.price) / 1e9,
             quantity: Number(ask.qty) / 1e9,
             amount: Number(ask.qty) / 1e9,
             value: (Number(ask.price) * Number(ask.qty)) / 1e18,
-            orderType: ask.orderType === 1 ? 'limit' : 'market',
-            clientId: spotData.clientId?.toString() || 'unknown',
-            orderId: ask.orderId?.toString() || 'unknown',
-            transactionHash: 'spot-order',
+            orderType: ask.orderType === 1 ? "limit" : "market",
+            clientId: spotData.clientId?.toString() || "unknown",
+            orderId: ask.orderId?.toString() || "unknown",
+            transactionHash: "spot-order",
             fees: {
               maker: 0,
               taker: 0,
@@ -409,324 +642,483 @@ export class TransactionDataFetcher {
             pnl: 0,
             pnlPercentage: 0,
             duration: 0,
-            status: 'open',
-            notes: `Spot ${ask.orderType === 1 ? 'Limit' : 'Market'} Sell Order`,
-            tradeType: 'spot',
-            logType: 'SpotOrder',
+            status: "open",
+            notes: `Spot ${ask.orderType === 1 ? "Limit" : "Market"} Sell Order`,
+            tradeType: "spot",
+            logType: "SpotOrder",
             discriminator: 10,
           });
         });
       }
-      
+
       return trades;
     } catch (error: any) {
-      console.error(`Error fetching trades for instrument ${instrumentId}:`, error.message);
+      console.error(
+        `Error fetching trades for instrument ${instrumentId}:`,
+        error.message,
+      );
       return [];
     }
   }
 
-
   private async fetchAndParseTransaction(
-    signature: string, 
-    sigInfo: any, 
-    startCounter: number
+    signature: string,
+    sigInfo: any,
+    startCounter: number,
   ): Promise<TradeRecord[]> {
     const tradeRecords: TradeRecord[] = [];
-    
+
     try {
-      // Get full transaction details - use same encoding as standalone function
-      const txResponse = await this.rpc.getTransaction(
-        signature as Signature,
-        {
+      // Get full transaction details
+      const txResponse = await this.rpc
+        .getTransaction(signature as Signature, {
           maxSupportedTransactionVersion: 0,
-          encoding: 'jsonParsed'
-        }
-      ).send();
-      
-      // Handle both direct response and { value: ... } response
+          encoding: "jsonParsed",
+        })
+        .send();
+
       const tx = (txResponse as any)?.value || txResponse;
-      
+
       if (!tx) {
-        console.log(`⚠️  No transaction data for signature: ${signature.substring(0, 16)}...`);
         return tradeRecords;
       }
 
       const logMessages = tx.meta?.logMessages || [];
-      
       if (logMessages.length === 0) return tradeRecords;
-      
-      // Extract Base64 "Program data" strings from logs
-      const programDataLogs: string[] = [];
-      for (const log of logMessages) {
-        const programDataMatch = log.match(/Program data:\s*([A-Za-z0-9+/=]+)/i);
-        if (programDataMatch) {
-          programDataLogs.push(programDataMatch[1]);
-        }
-      }
-      
-      // Decode Base64 program data using the engine's logsDecode method
-      const decodedEvents: DecodedLogMessage[] = [];
-      
-      // Only try to decode if engine is initialized
-      if (this.engineInitialized && this.engine) {
-        if (programDataLogs.length > 0) {
-          console.log(`\n🔍 Found ${programDataLogs.length} Program data entries for ${signature.substring(0, 16)}...`);
-          
-          try {
-            console.log(`   🔓 Attempting to decode all logs using logsDecode...`);
-            const allDecoded = await (this.engine as any).logsDecode(logMessages);
-            if (allDecoded && Array.isArray(allDecoded) && allDecoded.length > 0) {
-              decodedEvents.push(...allDecoded);
-              console.log(`   ✅ Successfully decoded ${allDecoded.length} event(s)`);
-              console.log(`   📦 Decoded data:`, JSON.stringify(allDecoded, null, 2));
-            } else {
-              console.log(`   ⚠️  logsDecode returned empty or invalid result:`, allDecoded);
-            }
-          } catch (decodeErr: any) {
-            console.log(`   ⚠️  Failed to decode all logs: ${decodeErr.message}`);
-            if (decodeErr.stack) {
-              console.log(`   Stack: ${decodeErr.stack.split('\n')[0]}`);
-            }
-            
-            console.log(`   🔄 Trying individual Base64 decoding...`);
-            for (let idx = 0; idx < Math.min(programDataLogs.length, 3); idx++) {
-              const base64Data = programDataLogs[idx];
-              try {
-                const formats = [
-                  `Program ${this.programId} data: ${base64Data}`,
-                  `Program data: ${base64Data}`,
-                  `Program log: ${base64Data}`
-                ];
-                
-                for (const formattedLog of formats) {
-                  try {
-                    const decoded = await (this.engine as any).logsDecode([formattedLog]);
-                    if (decoded && Array.isArray(decoded) && decoded.length > 0) {
-                      decodedEvents.push(...decoded);
-                      console.log(`   ✅ Decoded entry ${idx + 1} with format: "${formattedLog.substring(0, 50)}..."`);
-                      break; 
-                    }
-                  } catch (fmtErr: any) {
-                    console.error(fmtErr)
-                    // Try next format silently
-                  }
-                }
-              } catch (entryErr: any) {
-                console.log(`   ⚠️  Failed to decode entry ${idx + 1}: ${entryErr.message}`);
-              }
-            }
-          }
-        } else {
-          console.log(`\n🔓 No Program data entries found, attempting to decode all logs...`);
-          try {
-            const allDecoded = await (this.engine as any).logsDecode(logMessages);
-            if (allDecoded && Array.isArray(allDecoded) && allDecoded.length > 0) {
-              decodedEvents.push(...allDecoded);
-              console.log(`✅ Decoded ${allDecoded.length} event(s) from all logs`);
-              console.log(JSON.stringify(allDecoded, null, 2));
-            } else {
-              console.log(`⚠️  logsDecode returned empty result`);
-            }
-          } catch (decodeErr: any) {
-            console.log(`⚠️  Could not decode logs: ${decodeErr.message}`);
-            if (decodeErr.stack) {
-              console.log(`Stack: ${decodeErr.stack.split('\n').slice(0, 3).join('\n')}`);
-            }
-          }
-        }
-      } else {
-        console.log(`⚠️  Engine not initialized, skipping log decoding`);
-      }
-      
-      // Parse decoded events - ONLY tags 11 and 19 are fill events
-      for (const event of decodedEvents) {
-        // Be more strict: only tag 11 (spot fill) and tag 19 (perp fill) are actual trade fills
-        const isTradeEvent = event.tag === 11 || event.tag === 19;
-        
-        if (isTradeEvent) {
-          const side = (event as any).side === 0 ? "buy" : 
-                      (event as any).side === 1 ? "sell" : "unknown";
-          
-          const price = (event as any).price || null;
-          const rawSize = (event as any).qty || (event as any).perps || null;
-          const size = rawSize ? Number(rawSize) / 1e9 : null; 
-          const rebates = (event as any).rebates || null;
-          const fee = rebates ? -Number(rebates) / 1e9 : null; 
-          const orderId = (event as any).orderId || null;
-          const clientId = (event as any).clientId || null;
-          const tag = event.tag || null;
-          const instrumentId = this.extractInstrumentId(event);
 
-          
-          const tradeRecord: TradeRecord = {
-            id: `${tag === 11 ? 'spot' : tag === 19 ? 'perp' : 'trade'}-fill-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
-            timestamp: sigInfo.blockTime ? new Date(Number(sigInfo.blockTime) * 1000) : new Date(),
-            section: this.formatSection(sigInfo.blockTime ? new Date(Number(sigInfo.blockTime) * 1000) : new Date()),
-            symbol: instrumentId !== undefined 
-                ? this.getSymbolFromInstrId(instrumentId) 
-                : 'UNKNOWN',
-            side: side as 'buy' | 'sell',
-            instrument: instrumentId !== undefined
-                ? this.getInstrumentFromInstrId(instrumentId)
-                : 'UNKNOWN',
-            entryPrice: price ? Number(price) : 0,
-            exitPrice: price ? Number(price) : 0,
-            quantity: size || 0,
-            amount: size || 0,
-            value: price && size ? Number(price) * size : 0,
-            orderType: 'market',
-            clientId: clientId?.toString() || 'unknown',
-            orderId: orderId?.toString() || 'unknown',
-            transactionHash: signature,
-            fees: {
-              maker: 0,
-              taker: 0,
-              total: fee || 0,
-              rebates: fee || 0,
-            },
-            pnl: 0,
-            pnlPercentage: 0,
-            duration: 0,
-            status: 'breakeven',
-            notes: `${tag === 11 ? 'Spot' : tag === 19 ? 'Perp' : 'Trade'} ${side === 'buy' ? 'Buy' : 'Sell'} Fill`,
-            tradeType: tag === 11 ? 'spot' : tag === 19 ? 'perp' : 'spot',
-            logType: tag === 11 ? 'spotFillOrder' : tag === 19 ? 'perpFillOrder' : 'Unknown',
-            discriminator: tag ?? undefined,
-          };
-          
-          tradeRecords.push(tradeRecord);
-          
-          console.log(`\n💰 Trade Event Found (from decoded data):`);
-          console.log(`   Signature: ${signature.substring(0, 16)}...`);
-          console.log(`   Tag: ${tag} (${tag === 11 ? 'Spot Fill' : tag === 19 ? 'Perp Fill' : 'Unknown'})`);
-          console.log(`   Side: ${side} (raw: ${(event as any).side})`);
-          console.log(`   Price: ${price || 'N/A'}`);
-          console.log(`   Size: ${size || 'N/A'} (raw: ${rawSize || 'N/A'})`);
-          console.log(`   Fee/Rebates: ${fee || 'N/A'} (raw rebates: ${rebates || 'N/A'})`);
-          console.log(`   Order ID: ${orderId || 'N/A'}`);
-          console.log(`   Client ID: ${clientId || 'N/A'}`);
+      // Decode logs using the engine
+      const decodedEvents: DecodedLogMessage[] = [];
+
+      if (this.engineInitialized && this.engine) {
+        try {
+          const allDecoded = await (this.engine as any).logsDecode(logMessages);
+          if (
+            allDecoded &&
+            Array.isArray(allDecoded) &&
+            allDecoded.length > 0
+          ) {
+            decodedEvents.push(...allDecoded);
+          }
+        } catch (decodeErr) {
+          // Use fallback
         }
       }
-      
-      // Fallback: Parse raw log messages
-      if (decodedEvents.length === 0) {
-        for (const log of logMessages) {
-          const lowerLog = log.toLowerCase();
-          if (lowerLog.includes("taker buy") || lowerLog.includes("taker sell") || 
-              lowerLog.includes("fill") || lowerLog.includes("trade") ||
-              (lowerLog.includes("order") && (lowerLog.includes("executed") || lowerLog.includes("filled"))) ||
-              lowerLog.includes("position")) {
-            
-            const side = lowerLog.includes("buy") || lowerLog.includes("long") ? "buy" : 
-                        lowerLog.includes("sell") || lowerLog.includes("short") ? "sell" : "unknown";
-            
-            const priceMatch = log.match(/price[=:]\s*([\d.]+)/i);
-            const sizeMatch = log.match(/size[=:]\s*([\d.]+)/i);
-            const feeMatch = log.match(/fee[=:]\s*([\d.]+)/i);
-            const amountMatch = log.match(/amount[=:]\s*([\d.]+)/i);
-            
-            const tradeRecord: TradeRecord = {
-              id: `raw-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
-              timestamp: sigInfo.blockTime ? new Date(Number(sigInfo.blockTime) * 1000) : new Date(),
-              section: this.formatSection(sigInfo.blockTime ? new Date(Number(sigInfo.blockTime) * 1000) : new Date()),
-              symbol: 'UNKNOWN',
-              side: side as 'buy' | 'sell',
-              entryPrice: priceMatch ? parseFloat(priceMatch[1]) : 0,
-              exitPrice: priceMatch ? parseFloat(priceMatch[1]) : 0,
-              quantity: sizeMatch ? parseFloat(sizeMatch[1]) : (amountMatch ? parseFloat(amountMatch[1]) : 0),
-              amount: sizeMatch ? parseFloat(sizeMatch[1]) : (amountMatch ? parseFloat(amountMatch[1]) : 0),
+
+      // Process all decoded events
+      for (const event of decodedEvents) {
+        const tag = event.tag;
+
+        switch (tag) {
+          case 1: // Deposit
+          case LogType.deposit: {
+            const deposit = event as DepositReportModel;
+            const tokenSymbol = this.getTokenSymbol(deposit.tokenId);
+            const amount = Number(deposit.amount) / 1e9; // Scale down
+
+            tradeRecords.push({
+              id: `deposit-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
+              timestamp: sigInfo.blockTime
+                ? new Date(Number(sigInfo.blockTime) * 1000)
+                : new Date(),
+              section: this.formatSection(
+                sigInfo.blockTime
+                  ? new Date(Number(sigInfo.blockTime) * 1000)
+                  : new Date(),
+              ),
+              symbol: tokenSymbol,
+              side: "buy",
+              instrument: `${tokenSymbol}/USD`,
+              entryPrice: 0,
+              exitPrice: 0,
+              quantity: amount,
+              amount: amount,
               value: 0,
-              orderType: 'unknown',
-              clientId: 'unknown',
-              orderId: 'unknown',
+              orderType: "deposit",
+              clientId: deposit.clientId?.toString() || "unknown",
+              orderId: "N/A",
               transactionHash: signature,
               fees: {
                 maker: 0,
                 taker: 0,
-                total: feeMatch ? parseFloat(feeMatch[1]) : 0,
+                total: 0,
                 rebates: 0,
               },
               pnl: 0,
               pnlPercentage: 0,
               duration: 0,
-              status: 'breakeven',
-              notes: 'Parsed from raw log',
-              rawLogMessage: log
-            };
-            
-            tradeRecords.push(tradeRecord);
-            
-            console.log(`\n💰 Trade Event Found (from raw logs):`);
-            console.log(`   Signature: ${signature}`);
-            console.log(`   Side: ${side}`);
-            console.log(`   Price: ${priceMatch ? priceMatch[1] : 'N/A'}`);
-            console.log(`   Size: ${sizeMatch ? sizeMatch[1] : (amountMatch ? amountMatch[1] : 'N/A')}`);
-            console.log(`   Fee: ${feeMatch ? feeMatch[1] : 'N/A'}`);
-            console.log(`   Log: ${log}`);
+              status: "breakeven",
+              notes: `Deposit ${amount} ${tokenSymbol}`,
+              tradeType: "spot",
+              logType: "deposit",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          case 3: // Perp Deposit
+          case LogType.perpDeposit: {
+            const perpDeposit = event as any;
+            const instrumentSymbol = this.getInstrumentSymbol(
+              perpDeposit.instrId,
+            );
+            const amount = Number(perpDeposit.amount) / 1e9;
+
+            tradeRecords.push({
+              id: `perp-deposit-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
+              timestamp: sigInfo.blockTime
+                ? new Date(Number(sigInfo.blockTime) * 1000)
+                : new Date(),
+              section: this.formatSection(
+                sigInfo.blockTime
+                  ? new Date(Number(sigInfo.blockTime) * 1000)
+                  : new Date(),
+              ),
+              symbol: instrumentSymbol,
+              side: "buy",
+              instrument: instrumentSymbol,
+              entryPrice: 0,
+              exitPrice: 0,
+              quantity: amount,
+              amount: amount,
+              value: 0,
+              orderType: "deposit",
+              clientId: perpDeposit.clientId?.toString() || "unknown",
+              orderId: "N/A",
+              transactionHash: signature,
+              fees: {
+                maker: 0,
+                taker: 0,
+                total: 0,
+                rebates: 0,
+              },
+              pnl: 0,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "breakeven",
+              notes: `Perp Deposit ${amount} to ${instrumentSymbol}`,
+              tradeType: "perp",
+              logType: "perpDeposit",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          case 10: // Spot Place Order
+          case LogType.spotPlaceOrder: {
+            const placeOrder = event as any;
+            const instrumentSymbol = this.getInstrumentSymbol(
+              placeOrder.instrId,
+            );
+            const side = placeOrder.side === 0 ? "buy" : "sell";
+            const quantity = Number(placeOrder.qty) / 1e9;
+            const price = placeOrder.price; // Already scaled by engine
+
+            tradeRecords.push({
+              id: `place-order-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
+              timestamp: sigInfo.blockTime
+                ? new Date(Number(sigInfo.blockTime) * 1000)
+                : new Date(),
+              section: this.formatSection(
+                sigInfo.blockTime
+                  ? new Date(Number(sigInfo.blockTime) * 1000)
+                  : new Date(),
+              ),
+              symbol: instrumentSymbol,
+              side: side as "buy" | "sell",
+              instrument: instrumentSymbol,
+              entryPrice: price,
+              exitPrice: price,
+              quantity: quantity,
+              amount: quantity,
+              value: price * quantity,
+              orderType: placeOrder.orderType === 1 ? "limit" : "market",
+              clientId: placeOrder.clientId?.toString() || "unknown",
+              orderId: placeOrder.orderId?.toString() || "unknown",
+              transactionHash: signature,
+              fees: {
+                maker: 0,
+                taker: 0,
+                total: 0,
+                rebates: 0,
+              },
+              pnl: 0,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "open",
+              notes: `Place ${side === "buy" ? "Buy" : "Sell"} Order for ${quantity} ${instrumentSymbol} @ ${price}`,
+              tradeType: "spot",
+              logType: "spotPlaceOrder",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          case 11: // Spot Fill (Trade)
+          case LogType.spotFillOrder: {
+            const fill = event as SpotFillOrderReportModel;
+            const instrumentSymbol = this.getInstrumentSymbol(fill.crncy);
+            const side = fill.side === 0 ? "buy" : "sell";
+            const quantity = Number(fill.qty) / 1e9;
+            const price = fill.price; // Already scaled by engine
+            const rebates = fill.rebates ? -Number(fill.rebates) / 1e9 : 0;
+
+            tradeRecords.push({
+              id: `trade-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
+              timestamp: sigInfo.blockTime
+                ? new Date(Number(sigInfo.blockTime) * 1000)
+                : new Date(),
+              section: this.formatSection(
+                sigInfo.blockTime
+                  ? new Date(Number(sigInfo.blockTime) * 1000)
+                  : new Date(),
+              ),
+              symbol: instrumentSymbol,
+              side: side as "buy" | "sell",
+              instrument: instrumentSymbol,
+              entryPrice: price,
+              exitPrice: price,
+              quantity: quantity,
+              amount: quantity,
+              value: price * quantity,
+              orderType: "market",
+              clientId: fill.clientId?.toString() || "unknown",
+              orderId: fill.orderId?.toString() || "unknown",
+              transactionHash: signature,
+              fees: {
+                maker: 0,
+                taker: 0,
+                total: rebates,
+                rebates: rebates,
+              },
+              pnl: 0,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "breakeven",
+              notes: `${side === "buy" ? "Bought" : "Sold"} ${quantity} ${instrumentSymbol} @ ${price}`,
+              tradeType: "spot",
+              logType: "spotFillOrder",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          case 12: // Spot New Order
+          case LogType.spotNewOrder: {
+            const newOrder = event as any;
+            const side = newOrder.side === 0 ? "buy" : "sell";
+            const quantity = Number(newOrder.qty) / 1e9;
+            const crncy = Number(newOrder.crncy) / 1e9;
+
+            tradeRecords.push({
+              id: `new-order-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
+              timestamp: sigInfo.blockTime
+                ? new Date(Number(sigInfo.blockTime) * 1000)
+                : new Date(),
+              section: this.formatSection(
+                sigInfo.blockTime
+                  ? new Date(Number(sigInfo.blockTime) * 1000)
+                  : new Date(),
+              ),
+              symbol: "SOL/USDC", // You might want to derive this from context
+              side: side as "buy" | "sell",
+              instrument: "SOL/USDC",
+              entryPrice: crncy / quantity,
+              exitPrice: crncy / quantity,
+              quantity: quantity,
+              amount: quantity,
+              value: crncy,
+              orderType: "new",
+              clientId: "unknown",
+              orderId: "unknown",
+              transactionHash: signature,
+              fees: {
+                maker: 0,
+                taker: 0,
+                total: 0,
+                rebates: 0,
+              },
+              pnl: 0,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "open",
+              notes: `New ${side} Order`,
+              tradeType: "spot",
+              logType: "spotNewOrder",
+              discriminator: tag,
+            });
+            break;
+          }
+
+          case 15: // Spot Fees
+          case LogType.spotFees: {
+            const fees = event as SpotFeesReportModel;
+            const feeAmount = Number(fees.fees) / 1e9;
+            const refPayment = Number(fees.refPayment) / 1e9;
+
+            tradeRecords.push({
+              id: `fees-${startCounter + tradeRecords.length + 1}-${signature.substring(0, 8)}`,
+              timestamp: sigInfo.blockTime
+                ? new Date(Number(sigInfo.blockTime) * 1000)
+                : new Date(),
+              section: this.formatSection(
+                sigInfo.blockTime
+                  ? new Date(Number(sigInfo.blockTime) * 1000)
+                  : new Date(),
+              ),
+              symbol: "USDC",
+              side: "sell",
+              instrument: "Fees",
+              entryPrice: 0,
+              exitPrice: 0,
+              quantity: feeAmount,
+              amount: feeAmount,
+              value: feeAmount,
+              orderType: "fee",
+              clientId: fees.refClientId?.toString() || "unknown",
+              orderId: "N/A",
+              transactionHash: signature,
+              fees: {
+                maker: 0,
+                taker: 0,
+                total: feeAmount,
+                rebates: refPayment,
+              },
+              pnl: -feeAmount,
+              pnlPercentage: 0,
+              duration: 0,
+              status: "loss",
+              notes: `Trading Fees: ${feeAmount} USDC, Ref Payment: ${refPayment}`,
+              tradeType: "spot",
+              logType: "spotFees",
+              discriminator: tag,
+            });
+            break;
           }
         }
       }
-      
-      if (logMessages.length > 0 && startCounter === 0) {
-        console.log("\n📝 Sample Transaction Logs (first transaction):");
-        logMessages.forEach((log: string, idx: number) => {
-          console.log(`   [${idx}] ${log}`);
-        });
-      }
-      
+
       return tradeRecords;
     } catch (error: any) {
-      console.warn(`   ⚠️ Failed to parse tx ${signature.substring(0, 8)}: ${error.message}`);
+      console.warn(
+        `   ⚠️ Failed to parse tx ${signature.substring(0, 8)}: ${error.message}`,
+      );
       return tradeRecords;
     }
   }
 
+  // Add these helper methods to your class
+  private getTokenSymbol(tokenId: number): string {
+    const tokenMap: Record<number, string> = {
+      1: "USDC",
+      2: "SOL",
+      4: "LETTERA",
+      6: "VELIT",
+      8: "SUN",
+      10: "BRSH",
+      12: "MSHK",
+      14: "SOL",
+      16: "trs",
+      18: "sad",
+      20: "MDVD",
+      22: "333",
+      24: "BRSH",
+      26: "1",
+      28: "TST",
+      30: "asd",
+    };
+    return tokenMap[tokenId] || `TOKEN-${tokenId}`;
+  }
+
+  private getInstrumentSymbol(instrId: number): string {
+    const instrumentMap: Record<number, string> = {
+      0: "SOL/USDC",
+      2: "LETTERA/USDC",
+      4: "VELIT/USDC",
+      6: "SUN/USDC",
+      8: "BRSH/USDC",
+      10: "MSHK/USDC",
+      12: "SOL/USDC",
+      14: "trs/USDC",
+      16: "sad/USDC",
+      18: "MDVD/USDC",
+      20: "333/USDC",
+      22: "BRSH/USDC",
+      24: "1/USDC",
+      26: "TST/USDC",
+      28: "asd/USDC",
+    };
+    return instrumentMap[instrId] || `INSTR-${instrId}`;
+  }
+
   private parseRawLog(
-    log: string, 
-    signature: string, 
-    sigInfo: any, 
-    counter: number
+    log: string,
+    signature: string,
+    sigInfo: any,
+    counter: number,
   ): TradeRecord | null {
     const lowerLog = log.toLowerCase();
-    const timestamp = sigInfo.blockTime ? new Date(Number(sigInfo.blockTime) * 1000) : new Date();
-    
-    const side = lowerLog.includes("buy") || lowerLog.includes("long") ? "buy" : 
-                 lowerLog.includes("sell") || lowerLog.includes("short") ? "sell" : "unknown";
-    
+    const timestamp = sigInfo.blockTime
+      ? new Date(Number(sigInfo.blockTime) * 1000)
+      : new Date();
+
+    // Attempt to extract side from explicit numeric field like `side: 0` or by keywords
+    let side: string = "unknown";
+    const sideMatch = lowerLog.match(/side\s*[:=]\s*(\d+)/i);
+    if (sideMatch) {
+      const sideNum = Number(sideMatch[1]);
+      side = sideNum === 0 ? "buy" : sideNum === 1 ? "sell" : "unknown";
+    } else {
+      side =
+        lowerLog.includes("buy") || lowerLog.includes("long")
+          ? "buy"
+          : lowerLog.includes("sell") || lowerLog.includes("short")
+            ? "sell"
+            : "unknown";
+    }
+
     const priceMatch = log.match(/price[=:]\s*([\d.]+)/i);
-    const sizeMatch = log.match(/size[=:]\s*([\d.]+)/i) || log.match(/qty[=:]\s*([\d.]+)/i);
+    const sizeMatch =
+      log.match(/size[=:]\s*([\d.]+)/i) || log.match(/qty[=:]\s*([\d.]+)/i);
     const feeMatch = log.match(/fee[=:]\s*([\d.]+)/i);
     const amountMatch = log.match(/amount[=:]\s*([\d.]+)/i);
-    
+
     // Try to extract instrument ID
     const instrMatch = log.match(/instrId[=:]\s*(\d+)/i);
-    const symbol = instrMatch ? this.getSymbolFromInstrId(parseInt(instrMatch[1])) : 'UNKNOWN';
-    const instrument = instrMatch ? this.getInstrumentFromInstrId(parseInt(instrMatch[1])) : 'UNKNOWN';
-    
-    const quantity = sizeMatch ? parseFloat(sizeMatch[1]) : 
-                    (amountMatch ? parseFloat(amountMatch[1]) : 0);
-    
+    const symbol = instrMatch ? parseInt(instrMatch[1]).toString() : "UNKNOWN";
+    const instrument = instrMatch
+      ? parseInt(instrMatch[1]).toString()
+      : "UNKNOWN";
+
+    const quantity = sizeMatch
+      ? parseFloat(sizeMatch[1])
+      : amountMatch
+        ? parseFloat(amountMatch[1])
+        : 0;
+
     // Scale down if it looks like a large number (likely in lamports/1e9)
     const scaledQuantity = quantity > 1e9 ? quantity / 1e9 : quantity;
-    const scaledPrice = priceMatch && parseFloat(priceMatch[1]) > 1e9 ? 
-                       parseFloat(priceMatch[1]) / 1e9 : 
-                       (priceMatch ? parseFloat(priceMatch[1]) : 0);
-    
+    const scaledPrice =
+      priceMatch && parseFloat(priceMatch[1]) > 1e9
+        ? parseFloat(priceMatch[1]) / 1e9
+        : priceMatch
+          ? parseFloat(priceMatch[1])
+          : 0;
+
     return {
       id: `raw-${counter}-${signature.substring(0, 8)}`,
       timestamp,
       section: this.formatSection(timestamp),
       symbol,
-      side: side as 'buy' | 'sell',
+      side: side as "buy" | "sell",
       entryPrice: scaledPrice,
       exitPrice: scaledPrice,
       quantity: scaledQuantity,
       amount: scaledQuantity,
       value: scaledPrice * scaledQuantity,
-      orderType: 'unknown',
+      orderType: "unknown",
       instrument,
-      clientId: 'unknown',
-      orderId: 'unknown',
+      clientId: "unknown",
+      orderId: "unknown",
       transactionHash: signature,
       fees: {
         maker: 0,
@@ -737,26 +1129,26 @@ export class TransactionDataFetcher {
       pnl: 0,
       pnlPercentage: 0,
       duration: 0,
-      status: 'breakeven',
-      notes: 'Parsed from raw log',
-      tradeType: lowerLog.includes('perp') ? 'perp' : 'spot',
-      rawLogMessage: log
+      status: "breakeven",
+      notes: "Parsed from raw log",
+      tradeType: lowerLog.includes("perp") ? "perp" : "spot",
+      rawLogMessage: log,
     };
   }
 
   private parseDecodedLog(
-    log: DecodedLogMessage, 
-    signature: string, 
-    blockTime: number | null, 
-    counter: number
+    log: DecodedLogMessage,
+    signature: string,
+    blockTime: number | null,
+    counter: number,
   ): TradeRecord | null {
     const timestamp = blockTime ? new Date(blockTime * 1000) : new Date();
     const tag = log.tag;
-    
+
     // Get log type name safely
-    let logTypeName = 'Unknown';
+    let logTypeName = "Unknown";
     for (const key in LogType) {
-      if (typeof key === 'string' && !key.match(/^\d/)) {
+      if (typeof key === "string" && !key.match(/^\d/)) {
         const value = (LogType as any)[key];
         if (value === tag) {
           logTypeName = key;
@@ -764,21 +1156,23 @@ export class TransactionDataFetcher {
         }
       }
     }
-    
+
     // Check if this is a trade event (using numeric comparison)
-    const isTradeEvent = tag === 11 || tag === 19 || 
-                         tag === LogType.spotFillOrder || 
-                         tag === LogType.perpFillOrder ||
-                         (log as any).price !== undefined || 
-                         (log as any).qty !== undefined || 
-                         (log as any).perps !== undefined;
-    
+    const isTradeEvent =
+      tag === 11 ||
+      tag === 19 ||
+      tag === LogType.spotFillOrder ||
+      tag === LogType.perpFillOrder ||
+      (log as any).price !== undefined ||
+      (log as any).qty !== undefined ||
+      (log as any).perps !== undefined;
+
     if (!isTradeEvent) {
       return null;
     }
 
     const section = this.formatSection(timestamp);
-    
+
     // Scale values
     const scaleValue = (value: any): number => {
       if (!value) return 0;
@@ -797,23 +1191,24 @@ export class TransactionDataFetcher {
         const value = scaleValue(spotFill.crncy || 0);
         const rebates = spotFill.rebates ? -Number(spotFill.rebates) / 1e9 : 0;
 
-        const instrumentId = this.extractInstrumentId(spotFill) ?? spotFill.crncy;
+        const instrumentId =
+          this.extractInstrumentId(spotFill) ?? spotFill.crncy;
 
         return {
           id: `spot-fill-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getSymbolFromInstrId(instrumentId),
-          instrument: this.getInstrumentFromInstrId(instrumentId),   
-          side: isBuy ? 'buy' : 'sell',
+          symbol: String(instrumentId),
+          instrument: String(instrumentId),
+          side: isBuy ? "buy" : "sell",
           entryPrice: price,
           exitPrice: price,
           quantity,
           amount: quantity,
           value: value || price * quantity,
-          orderType: 'market',
-          clientId: spotFill.clientId?.toString() || 'unknown',
-          orderId: spotFill.orderId?.toString() || 'unknown',
+          orderType: "market",
+          clientId: spotFill.clientId?.toString() || "unknown",
+          orderId: spotFill.orderId?.toString() || "unknown",
           transactionHash: signature,
           fees: {
             maker: 0,
@@ -824,9 +1219,9 @@ export class TransactionDataFetcher {
           pnl: 0,
           pnlPercentage: 0,
           duration: 0,
-          status: 'breakeven',
-          notes: `Spot ${isBuy ? 'Buy' : 'Sell'} Fill`,
-          tradeType: 'spot',
+          status: "breakeven",
+          notes: `Spot ${isBuy ? "Buy" : "Sell"} Fill`,
+          tradeType: "spot",
           logType: logTypeName,
           discriminator: tag,
         };
@@ -840,23 +1235,24 @@ export class TransactionDataFetcher {
         const price = scaleValue(perpFill.price || 0);
         const value = scaleValue(perpFill.crncy || 0);
         const rebates = perpFill.rebates ? -Number(perpFill.rebates) / 1e9 : 0;
-        
-        const instrumentId = this.extractInstrumentId(perpFill) ?? perpFill.crncy;
+
+        const instrumentId =
+          this.extractInstrumentId(perpFill) ?? perpFill.crncy;
         return {
           id: `perp-fill-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getSymbolFromInstrId(instrumentId),
-          instrument: this.getInstrumentFromInstrId(instrumentId),
-          side: isLong ? 'long' : 'short',
+          symbol: instrumentId.toString(),
+          instrument: instrumentId.toString(),
+          side: isLong ? "long" : "short",
           entryPrice: price,
           exitPrice: price,
           quantity,
           amount: quantity,
           value: value || price * quantity,
-          orderType: 'market',
-          clientId: perpFill.clientId?.toString() || 'unknown',
-          orderId: perpFill.orderId?.toString() || 'unknown',
+          orderType: "market",
+          clientId: perpFill.clientId?.toString() || "unknown",
+          orderId: perpFill.orderId?.toString() || "unknown",
           transactionHash: signature,
           fees: {
             maker: 0,
@@ -867,9 +1263,9 @@ export class TransactionDataFetcher {
           pnl: 0,
           pnlPercentage: 0,
           duration: 0,
-          status: 'breakeven',
-          notes: `Perp ${isLong ? 'Long' : 'Short'} Fill`,
-          tradeType: 'perp',
+          status: "breakeven",
+          notes: `Perp ${isLong ? "Long" : "Short"} Fill`,
+          tradeType: "perp",
           logType: logTypeName,
           discriminator: tag,
         };
@@ -879,24 +1275,25 @@ export class TransactionDataFetcher {
         const funding = log as PerpFundingReportModel;
         const isReceived = funding.funding > 0;
         const fundingValue = scaleValue(funding.funding || 0);
-        
-        const instrumentId = this.extractInstrumentId(funding) ?? funding.instrId;
-        
+
+        const instrumentId =
+          this.extractInstrumentId(funding) ?? funding.instrId;
+
         return {
           id: `funding-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getSymbolFromInstrId(instrumentId),
-          instrument: this.getInstrumentFromInstrId(instrumentId),
-          side: isReceived ? 'long' : 'short',
+          symbol: instrumentId.toString(),
+          instrument: instrumentId.toString(),
+          side: isReceived ? "long" : "short",
           entryPrice: 0,
           exitPrice: 0,
           quantity: 0,
           amount: Math.abs(fundingValue),
           value: Math.abs(fundingValue),
-          orderType: 'unknown',
-          clientId: funding.clientId?.toString() || 'unknown',
-          orderId: 'N/A',
+          orderType: "unknown",
+          clientId: funding.clientId?.toString() || "unknown",
+          orderId: "N/A",
           transactionHash: signature,
           fees: {
             maker: 0,
@@ -907,9 +1304,9 @@ export class TransactionDataFetcher {
           pnl: fundingValue,
           pnlPercentage: 0,
           duration: 0,
-          status: fundingValue > 0 ? 'win' : 'loss',
-          notes: `${fundingValue > 0 ? 'Received' : 'Paid'} Funding`,
-          tradeType: 'perp',
+          status: fundingValue > 0 ? "win" : "loss",
+          notes: `${fundingValue > 0 ? "Received" : "Paid"} Funding`,
+          tradeType: "perp",
           fundingPayments: fundingValue,
           logType: logTypeName,
           discriminator: tag,
@@ -919,22 +1316,22 @@ export class TransactionDataFetcher {
       case LogType.perpSocLoss: {
         const socLoss = log as PerpSocLossReportModel;
         const lossValue = scaleValue(socLoss.socLoss || 0);
-        
+
         return {
           id: `socloss-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getSymbolFromInstrId(socLoss.instrId),
-          side: 'short',
+          symbol: socLoss.instrId?.toString(),
+          side: "short",
           entryPrice: 0,
           exitPrice: 0,
           quantity: 0,
           amount: Math.abs(lossValue),
           value: Math.abs(lossValue),
-          orderType: 'unknown',
-          instrument: this.getInstrumentFromInstrId(socLoss.instrId),
-          clientId: socLoss.clientId?.toString() || 'unknown',
-          orderId: 'N/A',
+          orderType: "unknown",
+          instrument: socLoss.instrId?.toString(),
+          clientId: socLoss.clientId?.toString() || "unknown",
+          orderId: "N/A",
           transactionHash: signature,
           fees: {
             maker: 0,
@@ -945,9 +1342,9 @@ export class TransactionDataFetcher {
           pnl: -lossValue,
           pnlPercentage: 0,
           duration: 0,
-          status: 'loss',
-          notes: 'Socialized Loss',
-          tradeType: 'perp',
+          status: "loss",
+          notes: "Socialized Loss",
+          tradeType: "perp",
           socializedLoss: lossValue,
           logType: logTypeName,
           discriminator: tag,
@@ -960,22 +1357,22 @@ export class TransactionDataFetcher {
         const isPerp = tag === LogType.perpOrderRevoke;
         const quantity = scaleValue(revoke.qty || 0);
         const price = scaleValue((revoke as any).price || 0);
-        
+
         return {
           id: `order-revoke-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getSymbolFromInstrId((log as any).instrId),
-          side: 'sell',
+          symbol: (log as any)?.instrId,
+          side: "sell",
           entryPrice: price,
           exitPrice: price,
           quantity,
           amount: quantity,
           value: quantity * price,
-          orderType: 'revoke',
-          instrument: this.getInstrumentFromInstrId((log as any).instrId),
-          clientId: revoke.clientId?.toString() || 'unknown',
-          orderId: revoke.orderId?.toString() || 'unknown',
+          orderType: "revoke",
+          instrument: (log as any).instrId,
+          clientId: revoke.clientId?.toString() || "unknown",
+          orderId: revoke.orderId?.toString() || "unknown",
           transactionHash: signature,
           fees: {
             maker: 0,
@@ -986,9 +1383,9 @@ export class TransactionDataFetcher {
           pnl: 0,
           pnlPercentage: 0,
           duration: 0,
-          status: 'breakeven',
-          notes: `${isPerp ? 'Perp' : 'Spot'} Order Revoke`,
-          tradeType: isPerp ? 'perp' : 'spot',
+          status: "breakeven",
+          notes: `${isPerp ? "Perp" : "Spot"} Order Revoke`,
+          tradeType: isPerp ? "perp" : "spot",
           logType: logTypeName,
           discriminator: tag,
         };
@@ -999,22 +1396,22 @@ export class TransactionDataFetcher {
         const depositWithdraw = log as DepositReportModel | WithdrawReportModel;
         const isDeposit = tag === LogType.deposit;
         const amount = scaleValue(depositWithdraw.amount || 0);
-        
+
         return {
-          id: `${isDeposit ? 'deposit' : 'withdraw'}-${counter}-${signature.substring(0, 8)}`,
+          id: `${isDeposit ? "deposit" : "withdraw"}-${counter}-${signature.substring(0, 8)}`,
           timestamp,
           section,
-          symbol: this.getTokenSymbol(depositWithdraw.tokenId),
-          side: isDeposit ? 'buy' : 'sell',
+          symbol: String(depositWithdraw.tokenId),
+          side: isDeposit ? "buy" : "sell",
           entryPrice: 0,
           exitPrice: 0,
           quantity: amount,
           amount: amount,
           value: amount,
-          orderType: 'unknown',
-          instrument: `${this.getTokenSymbol(depositWithdraw.tokenId)}/USD`,
-          clientId: depositWithdraw.clientId?.toString() || 'unknown',
-          orderId: 'N/A',
+          orderType: "unknown",
+          instrument: `${String(depositWithdraw.tokenId)}/USD`,
+          clientId: depositWithdraw.clientId?.toString() || "unknown",
+          orderId: "N/A",
           transactionHash: signature,
           fees: {
             maker: 0,
@@ -1025,9 +1422,9 @@ export class TransactionDataFetcher {
           pnl: 0,
           pnlPercentage: 0,
           duration: 0,
-          status: 'breakeven',
-          notes: isDeposit ? 'Deposit' : 'Withdrawal',
-          tradeType: 'spot',
+          status: "breakeven",
+          notes: isDeposit ? "Deposit" : "Withdrawal",
+          tradeType: "spot",
           logType: logTypeName,
           discriminator: tag,
         };
@@ -1039,192 +1436,176 @@ export class TransactionDataFetcher {
   }
 
   private formatSection(date: Date): string {
-    const day = date.getDate().toString().padStart(2, '0');
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = date.getDate().toString().padStart(2, "0");
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
     const month = monthNames[date.getMonth()];
     const year = date.getFullYear();
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const seconds = date.getSeconds().toString().padStart(2, '0');
+    const hours = date.getHours().toString().padStart(2, "0");
+    const minutes = date.getMinutes().toString().padStart(2, "0");
+    const seconds = date.getSeconds().toString().padStart(2, "0");
     return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
   }
 
-  private getInstrumentFromInstrId(instrId?: number): string {
-    return this.getSymbolFromInstrId(instrId);
-  }
-
-  private getTokenSymbol(tokenId?: number): string {
-    const tokenMap: Record<number, string> = {
-      1: 'SOL',
-      2: 'USDC',
-      3: 'BTC',
-      4: 'ETH',
+  // Exposed helper for tests: resolve instrument details using engine/instruments or token registry
+  async resolveInstrumentDetails(instrId?: number) {
+    const result: any = {
+      symbol: `INSTR-${instrId}`,
+      base: "UNKNOWN",
+      quote: "UNKNOWN",
     };
-    return tokenMap[tokenId || 0] || `TOKEN-${tokenId || 'UNKNOWN'}`;
-  }
 
-  private extractInstrumentId(event: any): number | undefined {
-  if (!event) return undefined;
-  
-  // Priority order of field names based on Deriverse kit
-  // 1. For fill events: crncy (as seen in SpotFillOrderReportModel, PerpFillOrderReportModel)
-  // 2. For funding/socLoss: instrId (as seen in PerpFundingReportModel, PerpSocLossReportModel)
-  // 3. For deposit/withdraw: tokenId (as seen in DepositReportModel, WithdrawReportModel)
-  // 4. For other events: instrumentId, marketId, etc.
-  
-  const fieldPriority = [
-    'crncy',      // Spot/Perp fills
-    'instrId',    // Funding, SocLoss, other perp events
-    'tokenId',    // Deposits, withdrawals
-    'instrumentId',
-    'marketId',
-    'baseCrncyId'
-  ];
-  
-  for (const field of fieldPriority) {
-    if (event[field] !== undefined && event[field] !== null) {
-      let value = event[field];
-      
-      // Handle different value types
-      if (typeof value === 'object') {
-        if (value?.toNumber) value = value.toNumber();
-        else if (value?.toString) value = Number(value.toString());
-        else continue;
+    try {
+      if (
+        this.engine &&
+        this.engine.instruments &&
+        typeof this.engine.instruments.get === "function"
+      ) {
+        const meta = this.engine.instruments.get(instrId as any);
+        if (meta && meta.header) {
+          const header = meta.header as any;
+          // Prefer asset/quote mints
+          if (header.assetMint && header.crncyMint) {
+            // Try to resolve token symbols from engine.tokens map
+            const baseMint = header.assetMint;
+            const quoteMint = header.crncyMint;
+            let base = "UNKNOWN";
+            let quote = "UNKNOWN";
+
+            if (this.engine.tokens && this.engine.tokens instanceof Map) {
+              const baseToken = this.engine.tokens.get(baseMint);
+              const quoteToken = this.engine.tokens.get(quoteMint);
+              base = typeof baseToken === "string" ? baseToken : base;
+              quote = typeof quoteToken === "string" ? quoteToken : quote;
+            }
+
+            // Fallback to TokenListProvider
+            if (base === "UNKNOWN" || quote === "UNKNOWN") {
+              try {
+                // dynamic import to reuse existing mocks in tests
+                const {
+                  TokenListProvider,
+                  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+                } = require("@solana/spl-token-registry");
+                const list = await new TokenListProvider().resolve();
+                const tokens = list.getList();
+                const baseEntry = tokens.find(
+                  (t: any) => t.address === baseMint,
+                );
+                const quoteEntry = tokens.find(
+                  (t: any) => t.address === quoteMint,
+                );
+                if (baseEntry) base = baseEntry.symbol;
+                if (quoteEntry) quote = quoteEntry.symbol;
+              } catch (err) {
+                // ignore
+              }
+            }
+
+            result.symbol = `${base}/${quote}`;
+            result.base = base;
+            result.quote = quote;
+            return result;
+          }
+          if (header.assetTokenId && header.crncyTokenId) {
+            // map numeric token ids to symbols if possible
+            const base =
+              (this.engine.tokens &&
+                this.engine.tokens.get(header.assetTokenId)) ||
+              `TOKEN-${header.assetTokenId}`;
+            const quote =
+              (this.engine.tokens &&
+                this.engine.tokens.get(header.crncyTokenId)) ||
+              `TOKEN-${header.crncyTokenId}`;
+            result.symbol = `${base}/${quote}`;
+            result.base = base;
+            result.quote = quote;
+            return result;
+          }
+        }
       }
-      
-      // Convert to number
-      const numValue = Number(value);
-      if (isNaN(numValue)) continue;
-      
-      // Check if it's scaled (most Deriverse values are in 1e9 scale)
-      if (numValue > 1e9) {
-        return numValue / 1e9;
-      }
-      
-      return numValue;
+    } catch (err) {
+      // ignore and fallback
     }
+
+    return result;
   }
-  
-  // Try to extract from raw log as fallback
-  if (event.rawLogMessage) {
-    const instrMatch = event.rawLogMessage.match(/instr[Ii]d[=:]\s*(\d+)/i);
-    if (instrMatch) return parseInt(instrMatch[1], 10);
-    
-    const crncyMatch = event.rawLogMessage.match(/crncy[=:]\s*(\d+)/i);
-    if (crncyMatch) return parseInt(crncyMatch[1], 10);
-    
-    const tokenMatch = event.rawLogMessage.match(/token[Ii]d[=:]\s*(\d+)/i);
-    if (tokenMatch) return parseInt(tokenMatch[1], 10);
-  }
-  
-  return undefined;
-}
-
-// Update the getSymbolFromInstrId with better mapping
-private getSymbolFromInstrId(instrId?: number): string {
-  if (instrId === undefined || instrId === null) {
-    return 'UNKNOWN';
-  }
-
-  // Ensure it's a number
-  let id: number;
-  if (typeof instrId === 'string') {
-    id = parseInt(instrId, 10);
-    if (isNaN(id)) return `INSTR-${instrId}`;
-  } else {
-    id = instrId;
-  }
-
-  // Deriverse instrument ID mapping (based on common patterns)
-  const symbolMap: Record<number, string> = {
-    0: 'USDC',      // Sometimes used for USDC
-    1: 'SOL/USDC',
-    2: 'BTC/USDC',
-    3: 'ETH/USDC',
-    4: 'APT/USDC',
-    5: 'ARB/USDC',
-    6: 'OP/USDC',
-    7: 'MATIC/USDC',
-    8: 'AVAX/USDC',
-    9: 'BNB/USDC',
-    10: 'LINK/USDC',
-    11: 'UNI/USDC',
-    12: 'AAVE/USDC',
-    13: 'ATOM/USDC',
-    14: 'DOT/USDC',
-    15: 'NEAR/USDC',
-    16: 'FTM/USDC',
-    17: 'ALGO/USDC',
-    18: 'FLOW/USDC',
-    19: 'ICP/USDC',
-    20: 'FIL/USDC',
-  };
-
-  return symbolMap[id] || `INSTR-${id}`;
-}
-
 
   // Export to CSV
   exportToCSV(tradeRecords: TradeRecord[]): string {
     const headers = [
-      'ID',
-      'Section',
-      'Timestamp (UTC)',
-      'Type',
-      'Instrument',
-      'Order Side',
-      'Price',
-      'Quantity',
-      'Amount',
-      'Value',
-      'Order Type',
-      'Client ID',
-      'Order ID',
-      'Transaction Hash',
-      'Trade Type',
-      'Log Type',
-      'Discriminator',
-      'Rebates',
-      'Funding Payments',
-      'Socialized Loss',
-      'Total Fee',
-      'PNL',
-      'Status',
-      'Notes'
+      "ID",
+      "Section",
+      "Timestamp (UTC)",
+      "Type",
+      "Instrument",
+      "Order Side",
+      "Price",
+      "Quantity",
+      "Amount",
+      "Value",
+      "Order Type",
+      "Client ID",
+      "Order ID",
+      "Transaction Hash",
+      "Trade Type",
+      "Log Type",
+      "Discriminator",
+      "Rebates",
+      "Funding Payments",
+      "Socialized Loss",
+      "Total Fee",
+      "PNL",
+      "Status",
+      "Notes",
     ];
 
-    const csvRows = [headers.join(',')];
-    
+    const csvRows = [headers.join(",")];
+
     for (const record of tradeRecords) {
-      csvRows.push([
-        record.id,
-        `"${record.section || ''}"`,
-        record.timestamp.toISOString(),
-        record.tradeType || '',
-        `"${record.instrument}"`,
-        record.side,
-        record.entryPrice.toFixed(6),
-        record.quantity.toFixed(6),
-        (record.amount || 0).toFixed(6),
-        (record.value || 0).toFixed(6),
-        record.orderType,
-        record.clientId,
-        record.orderId,
-        record.transactionHash,
-        record.tradeType || '',
-        record.logType || '',
-        record.discriminator?.toString() || '',
-        (record.fees.rebates || 0).toFixed(9),
-        (record.fundingPayments || 0).toFixed(9),
-        (record.socializedLoss || 0).toFixed(9),
-        record.fees.total.toFixed(9),
-        record.pnl.toFixed(6),
-        record.status,
-        `"${record.notes || ''}"`
-      ].join(','));
+      csvRows.push(
+        [
+          record.id,
+          `"${record.section || ""}"`,
+          record.timestamp.toISOString(),
+          record.tradeType || "",
+          `"${record.instrument}"`,
+          record.side,
+          record.entryPrice.toFixed(6),
+          record.quantity.toFixed(6),
+          (record.amount || 0).toFixed(6),
+          (record.value || 0).toFixed(6),
+          record.orderType,
+          record.clientId,
+          record.orderId,
+          record.transactionHash,
+          record.tradeType || "",
+          record.logType || "",
+          record.discriminator?.toString() || "",
+          (record.fees.rebates || 0).toFixed(9),
+          (record.fundingPayments || 0).toFixed(9),
+          (record.socializedLoss || 0).toFixed(9),
+          record.fees.total.toFixed(9),
+          record.pnl.toFixed(6),
+          record.status,
+          `"${record.notes || ""}"`,
+        ].join(","),
+      );
     }
 
-    return csvRows.join('\n');
+    return csvRows.join("\n");
   }
 
   // Export to JSON
@@ -1234,24 +1615,23 @@ private getSymbolFromInstrId(instrId?: number): string {
 
   // Get summary statistics
   getSummary(tradeRecords: TradeRecord[]): any {
-    const spotTrades = tradeRecords.filter(t => t.tradeType === 'spot');
-    const perpTrades = tradeRecords.filter(t => t.tradeType === 'perp');
-    const fills = tradeRecords.filter(t => 
-      t.logType?.includes('FillOrder') || 
-      t.logType?.includes('SpotFillOrder') || 
-      t.logType?.includes('PerpFillOrder') ||
-      t.discriminator === 11 || 
-      t.discriminator === 19 ||
-      t.discriminator === LogType.spotFillOrder ||
-      t.discriminator === LogType.perpFillOrder
+    const spotTrades = tradeRecords.filter((t) => t.tradeType === "spot");
+    const perpTrades = tradeRecords.filter((t) => t.tradeType === "perp");
+    const fills = tradeRecords.filter(
+      (t) =>
+        t.logType?.includes("FillOrder") ||
+        t.logType?.includes("SpotFillOrder") ||
+        t.logType?.includes("PerpFillOrder") ||
+        t.discriminator === 11 ||
+        t.discriminator === 19 ||
+        t.discriminator === LogType.spotFillOrder ||
+        t.discriminator === LogType.perpFillOrder,
     );
-    const cancels = tradeRecords.filter(t => 
-      t.logType?.includes('Cancel') || 
-      t.orderType === 'cancel'
+    const cancels = tradeRecords.filter(
+      (t) => t.logType?.includes("Cancel") || t.orderType === "cancel",
     );
-    const revokes = tradeRecords.filter(t => 
-      t.logType?.includes('Revoke') || 
-      t.orderType === 'revoke'
+    const revokes = tradeRecords.filter(
+      (t) => t.logType?.includes("Revoke") || t.orderType === "revoke",
     );
 
     const summary: any = {
@@ -1262,18 +1642,33 @@ private getSymbolFromInstrId(instrId?: number): string {
       orderCancels: cancels.length,
       orderRevokes: revokes.length,
       totalVolume: tradeRecords.reduce((sum, t) => sum + (t.value || 0), 0),
-      totalFees: tradeRecords.reduce((sum, t) => sum + t.fees.total, 0),
-      totalRebates: tradeRecords.reduce((sum, t) => sum + (t.fees.rebates || 0), 0),
-      totalFunding: tradeRecords.reduce((sum, t) => sum + (t.fundingPayments || 0), 0),
-      totalSocializedLoss: tradeRecords.reduce((sum, t) => sum + (t.socializedLoss || 0), 0),
-      winningTrades: tradeRecords.filter(t => t.status === 'win').length,
-      losingTrades: tradeRecords.filter(t => t.status === 'loss').length,
-      breakevenTrades: tradeRecords.filter(t => t.status === 'breakeven').length,
+      totalFees: parseFloat(
+        tradeRecords.reduce((sum, t) => sum + t.fees.total, 0).toFixed(2),
+      ),
+      totalRebates: parseFloat(
+        tradeRecords
+          .reduce((sum, t) => sum + (t.fees.rebates || 0), 0)
+          .toFixed(2),
+      ),
+      totalFunding: tradeRecords.reduce(
+        (sum, t) => sum + (t.fundingPayments || 0),
+        0,
+      ),
+      totalSocializedLoss: tradeRecords.reduce(
+        (sum, t) => sum + (t.socializedLoss || 0),
+        0,
+      ),
+      winningTrades: tradeRecords.filter((t) => t.status === "win").length,
+      losingTrades: tradeRecords.filter((t) => t.status === "loss").length,
+      breakevenTrades: tradeRecords.filter((t) => t.status === "breakeven")
+        .length,
     };
 
-    summary['netPnl'] = tradeRecords.reduce((sum, t) => sum + t.pnl, 0);
-    summary['netFees'] = summary.totalFees - summary.totalRebates;
-    
+    summary["netPnl"] = tradeRecords.reduce((sum, t) => sum + t.pnl, 0);
+    summary["netFees"] = parseFloat(
+      (summary.totalFees - summary.totalRebates).toFixed(2),
+    );
+
     return summary;
   }
 }

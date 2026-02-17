@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTradeAnalytics } from "@/hooks/use-trade-queries";
 import {
   AreaChart,
   Area,
@@ -11,7 +12,7 @@ import {
   Bar,
 } from "recharts";
 
-const data = [
+const sampleData = [
   { date: "Oct 1", pnl: 1000 },
   { date: "Oct 4", pnl: 1200 },
   { date: "Oct 6", pnl: 900 },
@@ -26,13 +27,19 @@ const data = [
   { date: "Oct 24", pnl: 4700 },
 ];
 
-const barData = data.map((d, i) => ({
-  ...d,
-  daily: i === 0 ? 0 : d.pnl - data[i - 1].pnl,
-}));
+const buildDailyFrom = (data: { date: string; pnl: number }[]) =>
+  data.map((d, i) => ({ ...d, daily: i === 0 ? 0 : d.pnl - data[i - 1].pnl }));
 
 const CumulativePnLChart = () => {
   const [mode, setMode] = useState<"line" | "bar">("line");
+  const { data: analytics } = useTradeAnalytics();
+
+  // Build chart data from analytics.dailyPnl if available
+  const chartData = analytics?.timing?.dailyPnl
+    ? Object.entries(analytics.timing.dailyPnl).map(([date, pnl]) => ({ date, pnl }))
+    : sampleData;
+
+  const barData = buildDailyFrom(chartData as { date: string; pnl: number }[]);
 
   return (
     <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-4">
@@ -67,7 +74,7 @@ const CumulativePnLChart = () => {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           {mode === "line" ? (
-            <AreaChart data={data}>
+            <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop
@@ -145,11 +152,7 @@ const CumulativePnLChart = () => {
                   fontSize: 12,
                 }}
               />
-              <Bar
-                dataKey="daily"
-                fill="hsl(187, 100%, 50%)"
-                radius={[2, 2, 0, 0]}
-              />
+              <Bar dataKey="daily" fill="hsl(187, 100%, 50%)" radius={[2, 2, 0, 0]} />
             </BarChart>
           )}
         </ResponsiveContainer>

@@ -9,6 +9,8 @@ import {
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useMemo, useEffect } from "react";
 import { TransactionDataFetcher } from "@/services/fetch-data.service";
+import { PnLCalculator } from "@/services/pnl-calculator.service";
+import { TradeAnalyticsCalculator } from "@/services/trade-analytics.service";
 import type { TradeRecord, FetchResult } from "@/types";
 
 // ============================================
@@ -206,6 +208,44 @@ export const useExportTrades = () => {
   });
 
   return { exportToCSV, exportToJSON };
+};
+
+// ============================================
+// Calculated PnL (FIFO matching with fees/funding)
+// ============================================
+export const useCalculatedPnL = () => {
+  const { data: trades = [] } = useAllTrades();
+  const { publicKey } = useTransactionFetcher();
+
+  return useQuery({
+    queryKey: tradeKeys.stats(publicKey?.toString()),
+    queryFn: async (): Promise<TradeRecord[]> => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      const calculator = new PnLCalculator(trades);
+      return calculator.calculatePnL();
+    },
+    enabled: !!publicKey && trades.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+};
+
+// ============================================
+// Full analytics using TradeAnalyticsCalculator
+// ============================================
+export const useTradeAnalytics = () => {
+  const { data: trades = [] } = useAllTrades();
+  const { publicKey } = useTransactionFetcher();
+
+  return useQuery({
+    queryKey: tradeKeys.summary(publicKey?.toString()),
+    queryFn: async () => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      const analytics = new TradeAnalyticsCalculator(trades);
+      return analytics.generateFullReport();
+    },
+    enabled: !!publicKey && trades.length > 0,
+    staleTime: Infinity,
+  });
 };
 
 // ============================================

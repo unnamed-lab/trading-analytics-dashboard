@@ -274,7 +274,7 @@ export class PerformanceAnalyzer {
     
     for (const orderType of orderTypes) {
       const typeTrades = this.trades.filter(t => t.orderType === orderType);
-      results.set(orderType, this.calculateMetrics({ trades: typeTrades }));
+      if (orderType) results.set(orderType, this.calculateMetrics({ trades: typeTrades }));
     }
     
     return results;

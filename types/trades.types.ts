@@ -14,7 +14,7 @@ export interface TradeRecord extends Partial<TradeComprehensiveRecord> {
   quantity: number;
   amount?: number;
   value?: number;
-  orderType:
+  orderType?:
     | "limit"
     | "market"
     | "cancel"
@@ -22,6 +22,8 @@ export interface TradeRecord extends Partial<TradeComprehensiveRecord> {
     | "fee"
     | "funding"
     | "event"
+    | "new"
+    | "deposit"
     | "unknown";
   instrument?: string;
   clientId: string;
@@ -80,7 +82,7 @@ export interface TradeComprehensiveRecord {
   isWinner: boolean;
   isLoser: boolean;
   isBreakeven: boolean;
-  
+
   // Risk metrics
   riskAmount?: number; // Amount risked on this trade
   riskRewardRatio?: number;

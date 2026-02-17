@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { TradeRecord, TradeStats } from '@/types'
+import { PnLCalculator } from '@/services/pnl-calculator.service'
 import { LogType } from '@deriverse/kit';
 
 export class TradeAnalyticsCalculator {
@@ -198,14 +199,18 @@ export class TradeAnalyticsCalculator {
 
   // Include fees in PnL
   calculateNetPnL(): number {
-    const fillPnL = this.calculatePnLFromFills();
-    const totalFees = this.trades.reduce((sum, t) => sum + t.fees.total, 0);
+    // Use PnLCalculator to get per-trade PnL (which includes proportional fees)
+    const pnlCalc = new PnLCalculator(this.trades);
+    const detailed = pnlCalc.calculatePnL();
+    const totalPnL = detailed.reduce((sum, t) => sum + (t.pnl || 0), 0);
+
+    // Add any funding payments that were not captured in fills
     const totalFunding = this.trades.reduce(
       (sum, t) => sum + (t.fundingPayments || 0),
       0,
     );
 
-    return fillPnL - totalFees + totalFunding;
+    return totalPnL + totalFunding;
   }
 
   // Symbol-specific performance

@@ -4,7 +4,7 @@ import { PublicKey } from "@solana/web3.js";
 import { Engine } from '@deriverse/kit';
 import { TransactionDataFetcher } from "./fetch-data.service";
 
-const dotenv = require("dotenv"); 
+const dotenv = require("dotenv");
 dotenv.config();
 
 // --- MOCKS ---
@@ -46,14 +46,14 @@ jest.mock('@deriverse/kit', () => {
       return {
         initialize: jest.fn().mockResolvedValue(undefined),
         setSigner: jest.fn().mockResolvedValue(undefined),
-        getClientData: jest.fn().mockResolvedValue({ 
+        getClientData: jest.fn().mockResolvedValue({
           spot: new Map(),
-          perp: new Map() 
+          perp: new Map()
         }),
         getClientSpotOrdersInfo: jest.fn().mockResolvedValue({}),
-        getClientSpotOrders: jest.fn().mockResolvedValue({ 
-          bids: [], 
-          asks: [] 
+        getClientSpotOrders: jest.fn().mockResolvedValue({
+          bids: [],
+          asks: []
         }),
         updateInstrData: jest.fn().mockResolvedValue(undefined),
         logsDecode: jest.fn().mockResolvedValue([]),
@@ -115,9 +115,11 @@ describe('Test the TransactionDataFetcher Class', () => {
   let warnSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    logSpy = jest.spyOn(global.console, 'log').mockImplementation(() => {});
-    errorSpy = jest.spyOn(global.console, 'error').mockImplementation(() => {});
-    warnSpy = jest.spyOn(global.console, 'warn').mockImplementation(() => {});
+    logSpy = jest.spyOn(global.console, 'log').mockImplementation(() => { });
+    errorSpy = jest.spyOn(global.console, 'error').mockImplementation(() => { });
+    warnSpy = jest.spyOn(global.console, 'warn').mockImplementation(() => { });
+    // Mock delay to prevent timeouts
+    jest.spyOn(TransactionDataFetcher.prototype as any, 'delay').mockResolvedValue(undefined);
     jest.clearAllMocks();
   });
 
@@ -142,21 +144,21 @@ describe('Test the TransactionDataFetcher Class', () => {
 
   it('should initialize the engine with mocked dependencies', async () => {
     tradeFetcher = new TransactionDataFetcher(rpcUrl, programId, version);
-    
+
     await tradeFetcher.initialize(mockWallet);
-    
+
     expect(logSpy).toHaveBeenCalledWith('🔍 Initialized DeRiverse Trade Data Fetcher');
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Wallet:'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Program ID:'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Version:'));
-    
+
     // Verify engine is initialized
     expect((tradeFetcher as any).engineInitialized).toBe(true);
   });
 
   it('should handle engine initialization errors', async () => {
     tradeFetcher = new TransactionDataFetcher(rpcUrl, programId, version);
-    
+
     // Mock Engine to throw on initialize
     (Engine as unknown as jest.Mock).mockImplementationOnce(() => {
       return {
@@ -167,11 +169,11 @@ describe('Test the TransactionDataFetcher Class', () => {
     });
 
     await tradeFetcher.initialize(mockWallet);
-    
+
     // Should log warning but not throw
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Engine initialization warning'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Continuing without full engine initialization'));
-    
+
     // Verify engineInitialized flag is false
     expect((tradeFetcher as any).engineInitialized).toBe(false);
   });
@@ -195,17 +197,17 @@ describe('Test the TransactionDataFetcher Class', () => {
     it('should fetch and parse transactions', async () => {
       // Setup mocks
       const mockRpc = (tradeFetcher as any).rpc;
-      
+
       // Mock signatures response
-      mockRpc.send.mockResolvedValueOnce([{ 
-        signature: 'sig123', 
-        err: null, 
-        blockTime: 1620000000 
+      mockRpc.send.mockResolvedValueOnce([{
+        signature: 'sig123',
+        err: null,
+        blockTime: 1620000000
       }]);
 
       // Mock transaction response with fill event
       mockRpc.send.mockResolvedValueOnce({
-        meta: { 
+        meta: {
           logMessages: [
             'Program data: test-base64-data'
           ],
@@ -235,7 +237,7 @@ describe('Test the TransactionDataFetcher Class', () => {
       expect(trades[0].side).toBe('buy');
       expect(trades[0].entryPrice).toBe(100);
       expect(trades[0].quantity).toBe(5);
-      
+
       // Verify analyzer received trades
       expect(mockAddTrades).toHaveBeenCalledWith(expect.any(Array));
     });
@@ -243,7 +245,7 @@ describe('Test the TransactionDataFetcher Class', () => {
     it('should handle RPC errors gracefully', async () => {
       const mockRpc = (tradeFetcher as any).rpc;
       mockRpc.send.mockRejectedValue(new Error('RPC Fail'));
-      
+
       const trades = await tradeFetcher.fetchAllTransactions();
       expect(trades).toEqual([]);
       expect(errorSpy).toHaveBeenCalled();
@@ -260,9 +262,9 @@ describe('Test the TransactionDataFetcher Class', () => {
 
     it('should return empty if no spot data for instrument', async () => {
       const mockEngine = (tradeFetcher as any).engine;
-      mockEngine.getClientData.mockResolvedValue({ 
+      mockEngine.getClientData.mockResolvedValue({
         spot: new Map(),
-        perp: new Map() 
+        perp: new Map()
       });
 
       const trades = await tradeFetcher.fetchTradesForInstrument(999);
@@ -273,38 +275,38 @@ describe('Test the TransactionDataFetcher Class', () => {
       const mockEngine = (tradeFetcher as any).engine;
       const spotMap = new Map();
       spotMap.set(1, { clientId: 123 });
-      
-      mockEngine.getClientData.mockResolvedValue({ 
+
+      mockEngine.getClientData.mockResolvedValue({
         spot: spotMap,
-        perp: new Map() 
+        perp: new Map()
       });
-      
+
       mockEngine.getClientSpotOrdersInfo.mockResolvedValue({});
-      
+
       mockEngine.getClientSpotOrders.mockResolvedValue({
-        bids: [{ 
-          orderId: 1, 
+        bids: [{
+          orderId: 1,
           qty: 10000000000, // 10 * 1e9
           price: 50000000000, // 50 * 1e9
-          orderType: 1 
+          orderType: 1
         }],
-        asks: [{ 
-          orderId: 2, 
+        asks: [{
+          orderId: 2,
           qty: 5000000000, // 5 * 1e9
           price: 60000000000, // 60 * 1e9
-          orderType: 1 
+          orderType: 1
         }]
       });
 
       const trades = await tradeFetcher.fetchTradesForInstrument(1);
-      
+
       expect(trades).toHaveLength(2);
-      
+
       const buyOrder = trades.find(t => t.side === 'buy');
       expect(buyOrder).toBeDefined();
       expect(buyOrder?.quantity).toBe(10);
       expect(buyOrder?.entryPrice).toBe(50);
-      
+
       const sellOrder = trades.find(t => t.side === 'sell');
       expect(sellOrder).toBeDefined();
       expect(sellOrder?.quantity).toBe(5);
@@ -314,7 +316,7 @@ describe('Test the TransactionDataFetcher Class', () => {
     it('should handle engine not initialized', async () => {
       const freshFetcher = new TransactionDataFetcher(rpcUrl, programId, version);
       (freshFetcher as any).engineInitialized = false;
-      
+
       const trades = await freshFetcher.fetchTradesForInstrument(1);
       expect(trades).toEqual([]);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Engine not initialized'));
@@ -358,9 +360,9 @@ describe('Test the TransactionDataFetcher Class', () => {
 
     it('should parse raw logs correctly', async () => {
       const mockRpc = (tradeFetcher as any).rpc;
-      
+
       // Mock signatures
-      mockRpc.send.mockResolvedValueOnce([{ 
+      mockRpc.send.mockResolvedValueOnce([{
         signature: 'sig123',
         err: null,
         blockTime: 1620000000
@@ -368,9 +370,9 @@ describe('Test the TransactionDataFetcher Class', () => {
 
       // Mock transaction with raw log
       const rawLog = "Program log: Order filled. side: 0, price: 100000000000, qty: 5000000000, instrId: 1";
-      
+
       mockRpc.send.mockResolvedValueOnce({
-        meta: { 
+        meta: {
           logMessages: [rawLog],
           err: null
         },
@@ -394,9 +396,9 @@ describe('Test the TransactionDataFetcher Class', () => {
 
     it('should parse decoded logs correctly', async () => {
       const mockRpc = (tradeFetcher as any).rpc;
-      
+
       // Mock signatures
-      mockRpc.send.mockResolvedValueOnce([{ 
+      mockRpc.send.mockResolvedValueOnce([{
         signature: 'sig123',
         err: null,
         blockTime: 1620000000
@@ -404,7 +406,7 @@ describe('Test the TransactionDataFetcher Class', () => {
 
       // Mock transaction with program data
       mockRpc.send.mockResolvedValueOnce({
-        meta: { 
+        meta: {
           logMessages: ['Program data: test-base64'],
           err: null
         },
@@ -442,7 +444,7 @@ describe('Test the TransactionDataFetcher Class', () => {
 
     beforeEach(async () => {
       tradeFetcher = new TransactionDataFetcher(rpcUrl, programId, version);
-      
+
       sampleTrades = [
         {
           id: 'spot-fill-1',
@@ -516,7 +518,7 @@ describe('Test the TransactionDataFetcher Class', () => {
 
     it('should get summary statistics', () => {
       const summary = tradeFetcher.getSummary(sampleTrades);
-      
+
       expect(summary.totalTrades).toBe(2);
       expect(summary.spotTrades).toBe(1);
       expect(summary.perpTrades).toBe(1);
@@ -541,7 +543,7 @@ describe('Test the TransactionDataFetcher Class', () => {
 
     it('should fetch paginated transactions', async () => {
       const mockRpc = (tradeFetcher as any).rpc;
-      
+
       // Mock signatures response with 2 signatures
       mockRpc.send.mockResolvedValueOnce([
         { signature: 'sig1', err: null, blockTime: 1620000000 },
@@ -559,7 +561,7 @@ describe('Test the TransactionDataFetcher Class', () => {
       });
 
       const result = await tradeFetcher.fetchTransactionsPaginated({ limit: 2 });
-      
+
       expect(result.trades).toBeDefined();
       expect(result.hasMore).toBe(false);
       expect(result.totalProcessed).toBe(2);
@@ -569,14 +571,14 @@ describe('Test the TransactionDataFetcher Class', () => {
     it('should handle before parameter', async () => {
       const mockRpc = (tradeFetcher as any).rpc;
       const getSignaturesSpy = mockRpc.getSignaturesForAddress;
-      
+
       mockRpc.send.mockResolvedValueOnce([]);
-      
-      await tradeFetcher.fetchTransactionsPaginated({ 
-        limit: 10, 
-        before: 'prevSig' 
+
+      await tradeFetcher.fetchTransactionsPaginated({
+        limit: 10,
+        before: 'prevSig'
       });
-      
+
       expect(getSignaturesSpy).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ before: 'prevSig' })

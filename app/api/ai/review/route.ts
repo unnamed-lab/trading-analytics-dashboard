@@ -36,6 +36,8 @@ function checkRateLimit(identifier: string): boolean {
   return true;
 }
 
+import { verifySolanaSignature } from "@/lib/solana-auth";
+
 export async function POST(request: NextRequest) {
   try {
     // Get client IP for rate limiting
@@ -47,6 +49,23 @@ export async function POST(request: NextRequest) {
         { error: "Rate limit exceeded. Please try again later." },
         { status: 429 },
       );
+    }
+
+    // Enforce wallet signature headers for ownership
+    const publicKey = request.headers.get("x-solana-publickey");
+    const signature = request.headers.get("x-solana-signature");
+    const messageB64 = request.headers.get("x-solana-message");
+
+    if (!publicKey || !signature || !messageB64) {
+      return NextResponse.json(
+        { error: "missing auth headers" },
+        { status: 401 },
+      );
+    }
+
+    const ok = verifySolanaSignature(publicKey, messageB64, signature);
+    if (!ok) {
+      return NextResponse.json({ error: "invalid signature" }, { status: 401 });
     }
 
     // Parse request body
@@ -117,15 +136,14 @@ Trade Details:
 - Fees Paid: $${(trade.fees?.total || 0).toFixed(6)}
 - Fee Impact: ${feeImpact}% of trade value
 
-${
-  sessionContext?.recentTrades
-    ? `
+${sessionContext?.recentTrades
+        ? `
 Recent Performance Context:
 - Last 10 trades PnL: $${sessionContext.recentTrades.reduce((sum, t) => sum + (t.pnl || 0), 0).toFixed(2)}
 - Win rate last 10: ${((sessionContext.recentTrades.filter((t) => (t.pnl || 0) > 0).length / sessionContext.recentTrades.length) * 100).toFixed(1)}%
 `
-    : ""
-}
+        : ""
+      }
 
 Trader's Journal Entry:
 """
@@ -200,11 +218,11 @@ Provide a comprehensive analysis in the following JSON format:
       ) {
         analysis.actionableInsights = [
           analysis.actionableInsights?.[0] ||
-            "Consider reviewing your entry criteria for this setup",
+          "Consider reviewing your entry criteria for this setup",
           analysis.actionableInsights?.[1] ||
-            "Evaluate your exit strategy against market conditions",
+          "Evaluate your exit strategy against market conditions",
           analysis.actionableInsights?.[2] ||
-            "Review position sizing relative to account risk",
+          "Review position sizing relative to account risk",
         ];
       }
 

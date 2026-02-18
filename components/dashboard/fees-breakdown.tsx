@@ -2,6 +2,10 @@ import { useMemo } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { useTradeAnalytics, useAllTrades } from "@/hooks/use-trade-queries";
 import { LogType } from "@deriverse/kit";
+import {
+  DashboardCardSkeleton,
+  DashboardError,
+} from "@/components/ui/dashboard-states";
 
 interface FeeData {
   name: string;
@@ -11,8 +15,10 @@ interface FeeData {
 }
 
 const FeesBreakdown = () => {
-  const { data: analytics } = useTradeAnalytics();
-  const { data: trades } = useAllTrades();
+  const { data: analytics, isLoading: analyticsLoading, isError: analyticsError, refetch } = useTradeAnalytics();
+  const { data: trades, isLoading: tradesLoading } = useAllTrades();
+
+  const isLoading = analyticsLoading || tradesLoading;
 
   const feeData = useMemo((): FeeData[] => {
     // First try to use analytics data
@@ -97,6 +103,18 @@ const FeesBreakdown = () => {
   const totalFees = useMemo(() => {
     return feeData.reduce((sum, item) => sum + item.value, 0);
   }, [feeData]);
+
+  if (isLoading) {
+    return <DashboardCardSkeleton title="Fees Breakdown" />;
+  }
+
+  if (analyticsError) {
+    return <DashboardError
+      title="Fees Data Error"
+      message="Failed to load fee usage"
+      onRetry={() => refetch()}
+    />;
+  }
 
   if (feeData.length === 0 || totalFees === 0) {
     return (

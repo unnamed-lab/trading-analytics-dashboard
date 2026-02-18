@@ -179,6 +179,7 @@ export interface TradeStats {
 // Journal entry linked to a trade
 export interface Journal {
   id: string;
+  title?: string;
   tradeId: string;
   date: string;
   symbol: string;

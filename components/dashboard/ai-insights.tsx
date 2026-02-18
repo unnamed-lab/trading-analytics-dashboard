@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
 import { useTradeAnalytics, useCalculatedPnL } from "@/hooks/use-trade-queries";
 import {
@@ -9,6 +9,10 @@ import {
   useGenerateAIReview,
 } from "@/hooks/use-ai-review";
 import type { AIReviewResult } from "@/types";
+import {
+  DashboardCardSkeleton,
+  DashboardError,
+} from "@/components/ui/dashboard-states";
 
 interface AIInsightsProps {
   showDetailed?: boolean;
@@ -20,8 +24,13 @@ const AIInsights = ({
   onInsightClick,
 }: AIInsightsProps) => {
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
   const { data: analytics } = useTradeAnalytics();
   const { data: pnlTrades } = useCalculatedPnL();
+
+  useEffect(() => {
+    setLastUpdated(new Date().toLocaleTimeString());
+  }, []); // Run on mount
 
   // Get recent trades for context
   const recentTrades = pnlTrades?.slice(0, 20) || [];
@@ -73,26 +82,18 @@ const AIInsights = ({
     })),
   ];
 
+
+
+  // ... inside component
+
   if (isLoading && allInsights.length === 0) {
-    return (
-      <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-5 h-full">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="rounded bg-primary px-2.5 py-1 text-xs font-bold tracking-wider text-primary-foreground uppercase">
-              AI Insights
-            </span>
-            <span className="text-xs text-muted-foreground animate-pulse">
-              Analyzing...
-            </span>
-          </div>
-          <RefreshCw className="h-4 w-4 text-muted-foreground animate-spin" />
-        </div>
-        <div className="flex items-center justify-center h-32 text-muted-foreground">
-          Generating insights from your trading data...
-        </div>
-      </div>
-    );
+    return <DashboardCardSkeleton title="AI Insights" />;
   }
+
+  // Note: useBatchAITradeReviews doesn't return isError, but we can check if data is missing after loading
+  // For now, we just fallback to empty state or show what we have. 
+  // If analytics failed, we might want to show error.
+
 
   return (
     <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-5 h-full">
@@ -102,7 +103,7 @@ const AIInsights = ({
             AI Insights
           </span>
           <span className="text-xs text-muted-foreground">
-            Updated {new Date().toLocaleTimeString()}
+            {lastUpdated ? `Updated ${lastUpdated}` : "Updating..."}
           </span>
         </div>
         <button
@@ -221,9 +222,8 @@ const InsightCard = ({
 
   return (
     <div
-      className={`flex gap-3 p-3 rounded-lg transition-colors ${
-        onClick ? "cursor-pointer hover:bg-secondary/50" : ""
-      }`}
+      className={`flex gap-3 p-3 rounded-lg transition-colors ${onClick ? "cursor-pointer hover:bg-secondary/50" : ""
+        }`}
       onClick={onClick}
     >
       <Icon className={`h-5 w-5 shrink-0 mt-0.5 ${colors[variant].icon}`} />
@@ -304,12 +304,12 @@ function useRiskInsights(analytics: any, trades: any[]) {
       trades
         .filter((t) => t.pnl > 0)
         .reduce((sum, t) => sum + t.duration / 60, 0) /
-        trades.filter((t) => t.pnl > 0).length || 0;
+      trades.filter((t) => t.pnl > 0).length || 0;
     const avgHoldLoss =
       trades
         .filter((t) => t.pnl < 0)
         .reduce((sum, t) => sum + t.duration / 60, 0) /
-        trades.filter((t) => t.pnl < 0).length || 0;
+      trades.filter((t) => t.pnl < 0).length || 0;
 
     if (avgHoldLoss > avgHoldWin * 1.2) {
       insights.push({

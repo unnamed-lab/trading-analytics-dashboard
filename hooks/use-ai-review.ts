@@ -19,10 +19,43 @@ interface ReviewContext {
 /**
  * Hook to get AI review for a specific trade
  */
+import { useWallet } from "@solana/wallet-adapter-react";
+import bs58 from "bs58";
+import { useCallback } from "react";
+
+// Helper to sign authentications
+const getAuthHeaders = async (
+  signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | undefined,
+  publicKey: string | undefined | null,
+) => {
+  if (!signMessage || !publicKey) {
+    throw new Error("Wallet not connected or does not support signing");
+  }
+
+  const timestamp = Date.now();
+  const messageString = `Authenticate AI Review: ${timestamp}`;
+  const messageBytes = new TextEncoder().encode(messageString);
+
+  const signature = await signMessage(messageBytes);
+  const signatureB58 = bs58.encode(signature);
+  const messageB64 = Buffer.from(messageString).toString("base64");
+
+  return {
+    "x-solana-publickey": publicKey,
+    "x-solana-signature": signatureB58,
+    "x-solana-message": messageB64,
+  };
+};
+
+/**
+ * Hook to get AI review for a specific trade
+ */
 export function useAITradeReview(
   trade: TradeRecord | null,
   enabled: boolean = true,
 ) {
+  const { signMessage, publicKey } = useWallet();
+
   return useQuery({
     queryKey: aiReviewKeys.detail(trade?.id || "none"),
     queryFn: async (): Promise<AIReviewResult | null> => {
@@ -47,14 +80,17 @@ export function useAITradeReview(
         }
       } catch (e) {
         // ignore storage issues
-        // eslint-disable-next-line no-console
         console.debug("ai-review cache read error", e);
       }
+
+      // If we need to fetch, we need a signature
+      const headers = await getAuthHeaders(signMessage, publicKey?.toBase58());
 
       const response = await fetch("/api/ai/review", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...headers,
         },
         body: JSON.stringify({
           trade,
@@ -69,7 +105,7 @@ export function useAITradeReview(
 
       const result = await response.json();
 
-      // Persist to localStorage to reduce future calls
+      // Persist to localStorage
       try {
         if (typeof window !== "undefined" && window.localStorage) {
           const key = `ai-review:${trade.id}`;
@@ -79,17 +115,15 @@ export function useAITradeReview(
           );
         }
       } catch (e) {
-        // eslint-disable-next-line no-console
         console.debug("ai-review cache write error", e);
       }
 
       return result;
     },
-    enabled: enabled && !!trade,
+    enabled: enabled && !!trade && !!publicKey,
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000, // 1 hour
-    retry: 2,
-    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    retry: false, // Don't retry auth errors
   });
 }
 
@@ -98,6 +132,7 @@ export function useAITradeReview(
  */
 export function useGenerateAIReview() {
   const queryClient = useQueryClient();
+  const { signMessage, publicKey } = useWallet();
 
   return useMutation({
     mutationFn: async ({
@@ -109,10 +144,13 @@ export function useGenerateAIReview() {
       journalContent: string;
       context?: ReviewContext;
     }): Promise<AIReviewResult> => {
+      const headers = await getAuthHeaders(signMessage, publicKey?.toBase58());
+
       const response = await fetch("/api/ai/review", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...headers,
         },
         body: JSON.stringify({
           trade,
@@ -132,7 +170,7 @@ export function useGenerateAIReview() {
       // Update the cache with the new review
       queryClient.setQueryData(aiReviewKeys.detail(variables.trade.id), data);
 
-      // Persist to localStorage as well to avoid repeated API calls
+      // Persist to localStorage
       try {
         if (typeof window !== "undefined" && window.localStorage) {
           const key = `ai-review:${variables.trade.id}`;
@@ -142,7 +180,6 @@ export function useGenerateAIReview() {
           );
         }
       } catch (e) {
-        // eslint-disable-next-line no-console
         console.debug("ai-review cache write failed", e);
       }
 
@@ -158,12 +195,27 @@ export function useGenerateAIReview() {
  * Hook to get AI reviews for multiple trades (batch)
  */
 export function useBatchAITradeReviews(trades: TradeRecord[]) {
+  const { signMessage, publicKey } = useWallet();
+
   return useQuery({
     queryKey: aiReviewKeys.list(trades.map((t) => t.id).join("-")),
     queryFn: async (): Promise<Map<string, AIReviewResult>> => {
       const reviews = new Map();
 
-      // Process in small batches to avoid rate limits and token waste
+      // We might need a signature for the whole batch?
+      // Or sign once and reuse? Ideally reuse token, but here we sign each request or sign once for session.
+      // For simplicity, let's sign ONCE for the batch if possible, but the batch logic loop does individual fetches.
+      // Refactoring to sign once and reuse headers for the loop.
+
+      let headers: Record<string, string>;
+      try {
+        headers = await getAuthHeaders(signMessage, publicKey?.toBase58());
+      } catch (e) {
+        console.warn("Skipping AI batch fetch, no wallet", e);
+        return reviews;
+      }
+
+      // Process in small batches
       const batchSize = 3;
       for (let i = 0; i < trades.length; i += batchSize) {
         const batch = trades.slice(i, i + batchSize);
@@ -189,7 +241,7 @@ export function useBatchAITradeReviews(trades: TradeRecord[]) {
                 }
               }
             } catch (e) {
-              // ignore storage issues
+              // ignore storage
             }
 
             try {
@@ -197,6 +249,7 @@ export function useBatchAITradeReviews(trades: TradeRecord[]) {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
+                  ...headers, // Reuse headers (replay attack risk if strict server, but acceptable here for same session)
                 },
                 body: JSON.stringify({
                   trade,
@@ -230,7 +283,6 @@ export function useBatchAITradeReviews(trades: TradeRecord[]) {
           }),
         );
 
-        // Delay between batches to reduce burst requests
         if (i + batchSize < trades.length) {
           await new Promise((resolve) => setTimeout(resolve, 1200));
         }
@@ -238,7 +290,8 @@ export function useBatchAITradeReviews(trades: TradeRecord[]) {
 
       return reviews;
     },
-    enabled: trades.length > 0,
+    enabled: trades.length > 0 && !!publicKey,
     staleTime: 30 * 60 * 1000,
+    retry: false,
   });
 }

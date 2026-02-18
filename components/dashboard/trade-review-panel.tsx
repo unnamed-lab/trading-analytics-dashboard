@@ -13,7 +13,10 @@ import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
 import formatBigNumber, { shortenHash } from "@/utils/number-format";
 import { useAITradeReview, useGenerateAIReview } from "@/hooks/use-ai-review";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import bs58 from "bs58";
+import { useJournals } from "@/hooks/use-journals";
 
 interface TradeReviewPanelProps {
   trade: TradeRecord;
@@ -31,6 +34,46 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
 
   const generateReview = useGenerateAIReview();
   const [regenerating, setRegenerating] = useState(false);
+  const { publicKey, signMessage } = useWallet();
+
+  const publicKeyStr = publicKey?.toBase58() ?? null;
+
+  // signer expects a base64 message string and returns base58 signature
+  const signer = async (messageB64: string) => {
+    if (!signMessage) throw new Error("wallet cannot sign messages");
+
+    // decode base64 to bytes in browser/node-safe way
+    let msgBytes: Uint8Array;
+    if (typeof window !== "undefined" && typeof window.atob === "function") {
+      const binary = window.atob(messageB64);
+      const arr = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+      msgBytes = arr;
+    } else {
+      const bin = Buffer.from(messageB64, "base64");
+      msgBytes = new Uint8Array(bin);
+    }
+
+    const signed = await signMessage(msgBytes as Uint8Array);
+    const sigBytes = (signed as any)?.signature ?? signed;
+    return bs58.encode(Buffer.from(sigBytes));
+  };
+
+  const { list, create, update, remove } = useJournals(
+    publicKeyStr,
+    signer,
+    trade.id,
+  );
+
+  const existing = list.data?.[0];
+
+  const [journalContent, setJournalContent] = useState<string>(
+    existing?.content ?? trade.notes ?? "",
+  );
+
+  useEffect(() => {
+    setJournalContent(existing?.content ?? trade.notes ?? "");
+  }, [existing?.id, trade.id]);
 
   // cached review info (client-only)
   let cachedMinutes: number | null = null;
@@ -290,12 +333,61 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
         </div>
 
         {/* Actions */}
+        <div className="px-5 pb-5">
+          <label className="text-xs text-muted-foreground">Journal</label>
+          <textarea
+            value={journalContent}
+            onChange={(e) => setJournalContent(e.target.value)}
+            className="w-full mt-2 min-h-[120px] rounded-md border border-border bg-card p-3 text-sm"
+          />
+        </div>
+
         <div className="mt-auto border-t border-border p-5 flex gap-3">
-          <button className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-secondary transition-colors">
-            Delete Log
+          <button
+            onClick={async () => {
+              try {
+                if (!existing) return;
+                await remove.mutateAsync(existing.id);
+              } catch (e) {
+                // ignore
+              }
+            }}
+            disabled={!existing || remove.isPending}
+            className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-60"
+          >
+            {remove.isPending ? (
+              <Loader2 className="animate-spin h-4 w-4 mx-auto" />
+            ) : (
+              "Delete Log"
+            )}
           </button>
-          <button className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity">
-            Save Changes
+          <button
+            onClick={async () => {
+              try {
+                if (existing) {
+                  await update.mutateAsync({
+                    id: existing.id,
+                    content: journalContent,
+                  });
+                } else {
+                  await create.mutateAsync({
+                    tradeId: trade.id,
+                    content: journalContent,
+                    title: `${trade.symbol} ${trade.id}`,
+                  });
+                }
+              } catch (e) {
+                // ignore
+              }
+            }}
+            disabled={create.isPending || update.isPending}
+            className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-60"
+          >
+            {create.isPending || update.isPending ? (
+              <Loader2 className="animate-spin h-4 w-4 mx-auto" />
+            ) : (
+              "Save Changes"
+            )}
           </button>
         </div>
       </div>

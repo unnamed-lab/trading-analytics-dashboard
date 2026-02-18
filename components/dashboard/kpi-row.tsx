@@ -6,6 +6,10 @@ import {
   ArrowUpDown,
 } from "lucide-react";
 import {
+  DashboardCardSkeleton,
+  DashboardError,
+} from "@/components/ui/dashboard-states";
+import {
   useTradeAnalytics,
   useCalculatedPnL,
   useAllTrades,
@@ -33,15 +37,19 @@ const defaultIcons = {
   ratio: ArrowUpDown,
 };
 
+
+
+// ... imports
+
 export default function KPIRow({
   analyticsProp,
 }: {
   analyticsProp?: Partial<AnalyticsSummary>;
 }) {
   // Get analytics from the full report
-  const { data: analytics } = useTradeAnalytics();
-  const { data: pnlCalculatedTrades } = useCalculatedPnL();
-  const { data: rawTrades } = useAllTrades();
+  const { data: analytics, isLoading: analyticsLoading, isError: analyticsError, refetch } = useTradeAnalytics();
+  const { data: pnlCalculatedTrades, isLoading: pnlLoading } = useCalculatedPnL();
+  const { data: rawTrades, isLoading: tradesLoading } = useAllTrades();
 
   // Derive metrics from the full analytics report or fallback to calculated values
   const metrics = useMemo(() => {
@@ -148,6 +156,28 @@ export default function KPIRow({
     };
   }, [analytics, pnlCalculatedTrades, rawTrades]);
 
+  const isLoading = analyticsLoading || pnlLoading || tradesLoading;
+
+  if (isLoading && !analyticsProp) {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {[...Array(5)].map((_, i) => (
+          <DashboardCardSkeleton key={i} className="h-32" />
+        ))}
+      </div>
+    );
+  }
+
+  if (analyticsError && !analyticsProp) {
+    return (
+      <DashboardError
+        message="Failed to load KPI metrics"
+        onRetry={() => refetch()}
+        className="min-h-[150px]"
+      />
+    );
+  }
+
   // Override with prop values if provided
   const finalMetrics = {
     ...metrics,
@@ -241,21 +271,19 @@ export default function KPIRow({
             <kpi.icon className="h-4 w-4 text-primary" />
           </div>
           <span
-            className={`font-mono text-xl sm:text-2xl font-bold ${
-              kpi.positive
-                ? "text-profit"
-                : kpi.negative
-                  ? "text-loss"
-                  : "text-foreground"
-            }`}
+            className={`font-mono text-xl sm:text-2xl font-bold ${kpi.positive
+              ? "text-profit"
+              : kpi.negative
+                ? "text-loss"
+                : "text-foreground"
+              }`}
           >
             {kpi.value}
           </span>
           {kpi.sub && (
             <span
-              className={`text-xs ${
-                kpi.positive ? "text-profit" : "text-muted-foreground"
-              }`}
+              className={`text-xs ${kpi.positive ? "text-profit" : "text-muted-foreground"
+                }`}
             >
               {kpi.sub}
             </span>

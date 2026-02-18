@@ -69,7 +69,7 @@ export type DecodedLogMessage =
   | WithdrawReportModel
   | SpotOrderRevokeReportModel
   | PerpOrderRevokeReportModel
-  | { tag: number; [key: string]: any };
+  | { tag: number;[key: string]: any };
 
 export interface PaginationOptions {
   limit?: number;
@@ -113,6 +113,37 @@ export class TransactionDataFetcher {
 
   private async delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async fetchWithRetries<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 5,
+    baseDelay: number = 2000,
+  ): Promise<T> {
+    let lastError: any;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        lastError = error;
+        const isRateLimit =
+          error?.message?.includes("429") ||
+          error?.toString().includes("429") ||
+          (error?.code === 429);
+
+        if (isRateLimit) {
+          const delayTime = baseDelay * Math.pow(2, i) + Math.random() * 1000;
+          console.warn(
+            `⚠️ Rate Limit (429). Retrying in ${(delayTime / 1000).toFixed(2)}s... (Attempt ${i + 1}/${maxRetries})`,
+          );
+          await this.delay(delayTime);
+          continue;
+        }
+        throw error;
+      }
+    }
+    console.error(`❌ Max retries (${maxRetries}) exceeded.`);
+    throw lastError;
   }
 
   async initialize(walletPublicKey: PublicKey): Promise<void> {
@@ -166,12 +197,14 @@ export class TransactionDataFetcher {
       let signaturesResponse: any;
       try {
         console.log("\n🔍 Fetching signatures for wallet...");
-        signaturesResponse = await this.rpc
-          .getSignaturesForAddress(
-            address(this.walletPublicKey.toString()),
-            requestOptions,
-          )
-          .send();
+        signaturesResponse = await this.fetchWithRetries(() =>
+          this.rpc
+            .getSignaturesForAddress(
+              address(this.walletPublicKey!.toString()),
+              requestOptions,
+            )
+            .send(),
+        );
       } catch (err1: any) {
         console.log("⚠️  Failed to fetch signatures");
         console.error(`  Error: ${err1.message}`);
@@ -191,19 +224,20 @@ export class TransactionDataFetcher {
 
       console.log(`✅ Found ${signatures.length} transactions`);
 
-      const relevantSignatures = await this.filterProgramSignatures(signatures);
+      const relevantTransactions =
+        await this.filterProgramSignatures(signatures);
       console.log(
-        `\n📊 Found ${relevantSignatures.length} program-related transactions out of ${signatures.length}`,
+        `\n📊 Found ${relevantTransactions.length} program-related transactions out of ${signatures.length}`,
       );
 
       await this.primeClientData();
 
-      const rawTrades = await this.processSignatures(relevantSignatures);
+      const rawTrades = await this.processSignatures(relevantTransactions);
 
       // ── Apply PnL calculation across all collected trades ──────────────
       const tradesWithPnL = this.applyPnL(rawTrades);
 
-      const hasMore = signatures.length > limit;
+      const hasMore = signatures.length >= limit;
       const lastSignature =
         signatures.length > 0
           ? signatures[signatures.length - 1].signature
@@ -215,7 +249,7 @@ export class TransactionDataFetcher {
         ),
         hasMore,
         lastSignature,
-        totalProcessed: relevantSignatures.length,
+        totalProcessed: relevantTransactions.length,
       };
     } catch (error: any) {
       console.error("Error fetching transactions:", error.message);
@@ -238,19 +272,23 @@ export class TransactionDataFetcher {
       let signaturesResponse: any;
       try {
         console.log("\n🔍 Method 1: Fetching signatures for wallet...");
-        signaturesResponse = await this.rpc
-          .getSignaturesForAddress(address(this.walletPublicKey.toString()), {
-            limit: this.maxTransactions,
-          })
-          .send();
+        signaturesResponse = await this.fetchWithRetries(() =>
+          this.rpc
+            .getSignaturesForAddress(address(this.walletPublicKey!.toString()), {
+              limit: this.maxTransactions,
+            })
+            .send(),
+        );
       } catch (err1: any) {
         console.log("⚠️  Method 1 failed, trying with program ID...");
         try {
-          signaturesResponse = await this.rpc
-            .getSignaturesForAddress(address(this.programId), {
-              limit: this.maxTransactions,
-            })
-            .send();
+          signaturesResponse = await this.fetchWithRetries(() =>
+            this.rpc
+              .getSignaturesForAddress(address(this.programId), {
+                limit: this.maxTransactions,
+              })
+              .send(),
+          );
         } catch (err2: any) {
           console.error("❌ Both methods failed:");
           console.error(`  Method 1 error: ${err1.message}`);
@@ -269,12 +307,13 @@ export class TransactionDataFetcher {
       }
 
       console.log(`✅ Found ${signatures.length} transactions`);
-      const relevantSignatures = await this.filterProgramSignatures(signatures);
+      const relevantTransactions =
+        await this.filterProgramSignatures(signatures);
       console.log(
-        `\n📊 Processing ${relevantSignatures.length} program-related transactions...`,
+        `\n📊 Processing ${relevantTransactions.length} program-related transactions...`,
       );
 
-      const rawTrades = await this.processSignatures(relevantSignatures);
+      const rawTrades = await this.processSignatures(relevantTransactions);
 
       // ── Apply PnL calculation ──────────────────────────────────────────
       const tradesWithPnL = this.applyPnL(rawTrades);
@@ -290,6 +329,72 @@ export class TransactionDataFetcher {
       console.error("Error fetching transactions:", error.message);
       throw error;
     }
+  }
+
+  filterTrades(
+    trades: TradeRecord[],
+    filters: {
+      period?: string;
+      customStart?: Date;
+      customEnd?: Date;
+      symbol?: string; // "All Symbols" or specific symbol
+      sides?: { long: boolean; short: boolean };
+    },
+  ): TradeRecord[] {
+    let filtered = [...trades];
+
+    // 1. Time Period
+    const now = new Date();
+    let startDate: Date | undefined;
+
+    if (filters.period) {
+      switch (filters.period) {
+        case "7D":
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case "30D":
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
+        case "90D":
+          startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+          break;
+        case "YTD":
+          startDate = new Date(now.getFullYear(), 0, 1);
+          break;
+        case "ALL":
+        default:
+          startDate = undefined;
+          break;
+      }
+    }
+
+    if (startDate) {
+      filtered = filtered.filter((t) => t.timestamp >= startDate!);
+    }
+
+    // 2. Symbol
+    if (filters.symbol && filters.symbol !== "All Symbols") {
+      filtered = filtered.filter((t) => t.symbol === filters.symbol);
+    }
+
+    // 3. Side (Long/Short)
+    if (filters.sides) {
+      const { long, short } = filters.sides;
+      if (!long && !short) {
+        return []; // No sides selected
+      }
+      if (!long || !short) {
+        filtered = filtered.filter((t) => {
+          const isLong = t.side === "buy" || t.side === "long";
+          const isShort = t.side === "sell" || t.side === "short";
+          if (long && isLong) return true;
+          if (short && isShort) return true;
+          return false;
+        });
+      }
+    }
+
+    return filtered;
   }
 
   // ── private helpers ──────────────────────────────────────────────────────
@@ -406,8 +511,10 @@ export class TransactionDataFetcher {
     }
   }
 
-  private async filterProgramSignatures(signatures: any[]): Promise<any[]> {
-    const relevant: any[] = [];
+  private async filterProgramSignatures(
+    signatures: any[],
+  ): Promise<{ sigInfo: any; tx: any }[]> {
+    const relevant: { sigInfo: any; tx: any }[] = [];
     console.log(
       `\n🔍 Filtering transactions for program ID: ${this.programId}`,
     );
@@ -415,17 +522,20 @@ export class TransactionDataFetcher {
     for (const sigInfo of signatures) {
       if (sigInfo.err !== null) continue;
       try {
-        const txResponse = await this.rpc
-          .getTransaction(sigInfo.signature as Signature, {
-            maxSupportedTransactionVersion: 0,
-            encoding: "jsonParsed",
-          })
-          .send();
+        const txResponse = await this.fetchWithRetries(() =>
+          this.rpc
+            .getTransaction(sigInfo.signature as Signature, {
+              maxSupportedTransactionVersion: 0,
+              encoding: "jsonParsed",
+            })
+            .send(),
+        );
+
         const tx = (txResponse as any)?.value ?? txResponse;
         if (!tx) continue;
 
         if (this.transactionInvolvesProgram(tx)) {
-          relevant.push(sigInfo);
+          relevant.push({ sigInfo, tx });
           console.log(
             `   ✅ ${sigInfo.signature.substring(0, 8)}... involves program`,
           );
@@ -438,26 +548,29 @@ export class TransactionDataFetcher {
     return relevant;
   }
 
-  private async processSignatures(signatures: any[]): Promise<TradeRecord[]> {
+  private async processSignatures(
+    transactions: { sigInfo: any; tx: any }[],
+  ): Promise<TradeRecord[]> {
     const allTrades: TradeRecord[] = [];
     let processedCount = 0;
 
-    for (const sigInfo of signatures) {
+    for (const { sigInfo, tx } of transactions) {
       processedCount++;
       if (processedCount % 5 === 0) {
-        console.log(`   Progress: ${processedCount}/${signatures.length}`);
+        console.log(`   Progress: ${processedCount}/${transactions.length}`);
       }
       try {
-        const records = await this.fetchAndParseTransaction(
+        const records = await this.parseTransactionData(
           sigInfo.signature,
           sigInfo,
-          allTrades.length,
+          tx,
         );
         allTrades.push(...records);
-        await this.delay(this.requestDelayMs);
+        // Reduced delay since we aren't fetching anymore
+        await this.delay(5);
       } catch (error: any) {
         console.warn(
-          `   ⚠️ Failed to fetch tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`,
+          `   ⚠️ Failed to parse tx ${sigInfo.signature.substring(0, 8)}: ${error.message}`,
         );
       }
     }
@@ -542,22 +655,14 @@ export class TransactionDataFetcher {
     return undefined;
   }
 
-  private async fetchAndParseTransaction(
+  private async parseTransactionData(
     signature: string,
     sigInfo: any,
-    _startCounter: number,
+    tx: any,
   ): Promise<TradeRecord[]> {
     const tradeRecords: TradeRecord[] = [];
 
     try {
-      const txResponse = await this.rpc
-        .getTransaction(signature as Signature, {
-          maxSupportedTransactionVersion: 0,
-          encoding: "jsonParsed",
-        })
-        .send();
-
-      const tx = (txResponse as any)?.value ?? txResponse;
       if (!tx) return tradeRecords;
 
       const logMessages: string[] = tx.meta?.logMessages ?? [];
@@ -614,6 +719,7 @@ export class TransactionDataFetcher {
 
       for (const event of decodedEvents) {
         const tag = event.tag;
+        const uniqueId = `${signature}-${tradeRecords.length}`;
 
         switch (tag) {
           // ── Deposit ───────────────────────────────────────────────────
@@ -625,7 +731,7 @@ export class TransactionDataFetcher {
             console.log("Deposit:: ", deposit);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol: tokenSymbol,
@@ -662,7 +768,7 @@ export class TransactionDataFetcher {
             console.log("Withdraw:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol: tokenSymbol,
@@ -701,7 +807,7 @@ export class TransactionDataFetcher {
             console.log("PerpDeposit:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,
@@ -742,7 +848,7 @@ export class TransactionDataFetcher {
             console.log("SpotPlaceOrder:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,
@@ -796,7 +902,7 @@ export class TransactionDataFetcher {
             console.log("SpotFillOrder:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,
@@ -840,7 +946,7 @@ export class TransactionDataFetcher {
             console.log("SpotNewOrder:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,
@@ -876,7 +982,7 @@ export class TransactionDataFetcher {
             console.log("SpotFees:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol: "SOL",
@@ -941,7 +1047,7 @@ export class TransactionDataFetcher {
             console.log("PerpFillOrder:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,
@@ -985,7 +1091,7 @@ export class TransactionDataFetcher {
             console.log("PerpFunding:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,
@@ -1021,7 +1127,7 @@ export class TransactionDataFetcher {
             console.log("PerpFees:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol: "SOL",
@@ -1059,7 +1165,7 @@ export class TransactionDataFetcher {
             console.log("Perp Socialized Loss:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,
@@ -1108,7 +1214,7 @@ export class TransactionDataFetcher {
             console.log(isPerp ? "Perp" : "Spot", "OrderRevoked:: ", event);
 
             tradeRecords.push({
-              id: signature,
+              id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,

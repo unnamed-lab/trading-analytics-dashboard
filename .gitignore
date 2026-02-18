@@ -44,3 +44,6 @@ next-env.d.ts
 /exports
 *.exports.txt
 *.exports.json
+
+
+/prisma/generated

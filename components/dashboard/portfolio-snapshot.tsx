@@ -1,13 +1,19 @@
 import { useMemo } from "react";
 import { useTradeAnalytics, useCalculatedPnL } from "@/hooks/use-trade-queries";
+import {
+  DashboardCardSkeleton,
+  DashboardError,
+} from "@/components/ui/dashboard-states";
 
 interface PortfolioSnapshotProps {
   initialBalance?: number; // Starting balance if known
 }
 
 const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
-  const { data: analytics } = useTradeAnalytics();
-  const { data: pnlTrades } = useCalculatedPnL();
+  const { data: analytics, isLoading: analyticsLoading, isError: analyticsError, refetch } = useTradeAnalytics();
+  const { data: pnlTrades, isLoading: pnlLoading } = useCalculatedPnL();
+
+  const isLoading = analyticsLoading || pnlLoading;
 
   const portfolioData = useMemo(() => {
     // Get total PnL from analytics or calculate
@@ -48,9 +54,9 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
     const marginUsage =
       totalVolume > 0
         ? Math.min(
-            100,
-            (Math.abs(totalPnL) / (totalVolume / assumedLeverage)) * 100,
-          )
+          100,
+          (Math.abs(totalPnL) / (totalVolume / assumedLeverage)) * 100,
+        )
         : 0;
 
     // Calculate account value (assuming initial balance + PnL - fees)
@@ -81,6 +87,18 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
       isProfitableOverall: totalPnL > 0,
     };
   }, [analytics, pnlTrades, initialBalance]);
+
+  if (isLoading) {
+    return <DashboardCardSkeleton title="Portfolio Snapshot" />;
+  }
+
+  if (analyticsError) {
+    return <DashboardError
+      title="Portfolio Data Error"
+      message="Failed to load portfolio data"
+      onRetry={() => refetch()}
+    />;
+  }
 
   if (!pnlTrades?.length && !analytics) {
     return (
@@ -115,9 +133,8 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
         <div className="flex items-center gap-2 mt-1">
           <span className="text-xs text-muted-foreground">Total PnL:</span>
           <span
-            className={`text-xs font-mono font-bold ${
-              portfolioData.isProfitableOverall ? "text-profit" : "text-loss"
-            }`}
+            className={`text-xs font-mono font-bold ${portfolioData.isProfitableOverall ? "text-profit" : "text-loss"
+              }`}
           >
             {portfolioData.isProfitableOverall ? "+" : "-"}$
             {Math.abs(portfolioData.totalPnL).toFixed(2)}
@@ -136,21 +153,19 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
           <span className="text-xs text-muted-foreground">{"Today's PnL"}</span>
           <div className="flex flex-col">
             <span
-              className={`font-mono text-xl font-bold ${
-                portfolioData.isProfitableToday ? "text-profit" : "text-loss"
-              }`}
+              className={`font-mono text-xl font-bold ${portfolioData.isProfitableToday ? "text-profit" : "text-loss"
+                }`}
             >
               {portfolioData.isProfitableToday ? "+" : "-"}$
               {Math.abs(portfolioData.todayPnL).toFixed(2)}
             </span>
             <span
-              className={`text-xs ${
-                portfolioData.todayPnL !== 0
-                  ? portfolioData.isProfitableToday
-                    ? "text-profit"
-                    : "text-loss"
-                  : "text-muted-foreground"
-              }`}
+              className={`text-xs ${portfolioData.todayPnL !== 0
+                ? portfolioData.isProfitableToday
+                  ? "text-profit"
+                  : "text-loss"
+                : "text-muted-foreground"
+                }`}
             >
               {portfolioData.todayPnL !== 0
                 ? portfolioData.isProfitableToday

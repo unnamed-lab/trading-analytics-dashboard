@@ -9,20 +9,58 @@ import { formatSide, isBullishSide, formatPrice } from "@/types";
 import TradeReviewPanel from "./trade-review-panel";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { TableSkeleton } from "@/components/ui/loading-skeleton";
 
-const TradeHistory = () => {
+import { TradeFilters } from "@/hooks/use-trade-queries";
+import { DashboardError } from "@/components/ui/dashboard-states";
+
+const TradeHistory = ({ filters }: { filters?: TradeFilters }) => {
   const [selectedTrade, setSelectedTrade] = useState<TradeRecord | null>(null);
   const { connected, publicKey } = useWallet();
 
   // Use real data if wallet is connected, otherwise use mock data
-  const { data: realTrades = [], isLoading: realLoading } = useAllTrades({
+  const {
+    data: realTrades = [],
+    isLoading: realLoading,
+    isError: realError,
+    refetch: refetchReal
+  } = useAllTrades({
     enabled: connected && !!publicKey,
     excludeFees: true,
+    filters,
   });
 
-  const { data: mockTrades = [], isLoading: mockLoading } = useMockTrades({
+  const {
+    data: mockTrades = [],
+    isLoading: mockLoading,
+    isError: mockError,
+    refetch: refetchMock
+  } = useMockTrades({
     enabled: !connected || process.env.NODE_ENV === "development",
+    filters,
   });
+
+  if (connected && realError) {
+    return (
+      <DashboardError
+        title="Trade History Error"
+        message="Failed to load trade history"
+        onRetry={() => refetchReal()}
+        className="min-h-[400px]"
+      />
+    );
+  }
+
+  if (!connected && mockError && process.env.NODE_ENV === "development") {
+    return (
+      <DashboardError
+        title="Mock Data Error"
+        message="Failed to load mock data"
+        onRetry={() => refetchMock()}
+        className="min-h-[400px]"
+      />
+    );
+  }
 
   const trades = connected ? realTrades : mockTrades;
   const isLoading = connected ? realLoading : mockLoading;
@@ -30,11 +68,13 @@ const TradeHistory = () => {
 
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-border bg-card p-8">
-        <div className="flex items-center justify-center gap-2 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span>Loading trades...</span>
+      <div className="rounded-lg border border-border bg-card p-5">
+        <div className="flex items-center justify-between pb-4">
+          <h3 className="font-semibold text-sm text-foreground">
+            Recent Trade History
+          </h3>
         </div>
+        <TableSkeleton rows={5} className="w-full" />
       </div>
     );
   }
@@ -113,17 +153,16 @@ const TradeHistory = () => {
                     </td>
                     <td className="px-5 py-3.5">
                       <span
-                        className={`rounded px-2 py-0.5 text-xs font-bold ${
-                          bullish
-                            ? "bg-profit/15 text-profit"
-                            : "bg-loss/15 text-loss"
-                        }`}
+                        className={`rounded px-2 py-0.5 text-xs font-bold ${bullish
+                          ? "bg-profit/15 text-profit"
+                          : "bg-loss/15 text-loss"
+                          }`}
                       >
                         {formatSide(trade.side)}
                       </span>
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
-                      {formatPrice(trade?.entryPrice )|| "-"}
+                      {formatPrice(trade?.entryPrice) || "-"}
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
                       {trade?.amount || 0}

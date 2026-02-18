@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Journal {
+  id        String   @id @default(cuid())
+  title     String?
+  content   String
+  tradeId   String?  // optional association to a trade
+  owner     String   // wallet address of the journal owner (base58)
+  symbol    String?
+  side      String?
+  pnl       Float?
+  pnlPct    Float?   @map("pnlPercentage")
+  transactionHash String?
+  tradeTimestamp DateTime?
+  tags      String[] @default([])
+  aiAnalyzed Boolean   @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+

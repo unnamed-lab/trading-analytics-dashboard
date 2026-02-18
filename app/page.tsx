@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import FilterBar from "@/components/dashboard/filter-bar";
 import AIInsights from "@/components/dashboard/ai-insights";
 import KPIRow from "@/components/dashboard/kpi-row";
@@ -10,9 +12,21 @@ import TradeHistory from "@/components/dashboard/trade-history";
 
 
 export default function HomePage() {
+  const [activePeriod, setActivePeriod] = useState("7D");
+  const [sides, setSides] = useState({ long: true, short: true });
+
+  const filters = {
+    period: activePeriod,
+    sides,
+  };
+
   return (
     <>
-      {/* <FilterBar /> */}
+      <FilterBar
+        activePeriod={activePeriod}
+        setActivePeriod={setActivePeriod}
+        onSideChange={setSides}
+      />
       <div className="px-4 sm:px-6 pb-8 flex flex-col gap-4 sm:gap-5">
         <KPIRow />
 
@@ -32,7 +46,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        <TradeHistory />
+        <TradeHistory filters={filters} />
       </div>
     </>
   );

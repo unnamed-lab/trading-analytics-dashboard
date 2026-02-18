@@ -12,6 +12,10 @@ import {
   Bar,
   Cell,
 } from "recharts";
+import {
+  DashboardCardSkeleton,
+  DashboardError,
+} from "@/components/ui/dashboard-states";
 
 interface ChartDataPoint {
   date: string;
@@ -22,8 +26,10 @@ interface ChartDataPoint {
 
 const CumulativePnLChart = () => {
   const [mode, setMode] = useState<"line" | "bar">("line");
-  const { data: analytics } = useTradeAnalytics();
-  const { data: pnlTrades } = useCalculatedPnL();
+  const { data: analytics, isLoading: analyticsLoading, isError: analyticsError, refetch } = useTradeAnalytics();
+  const { data: pnlTrades, isLoading: pnlLoading } = useCalculatedPnL();
+
+  const isLoading = analyticsLoading || pnlLoading;
 
   // Generate chart data from analytics timeSeries or calculate from trades
   const chartData = useMemo((): ChartDataPoint[] => {
@@ -95,6 +101,19 @@ const CumulativePnLChart = () => {
     }));
   }, [chartData]);
 
+  if (isLoading) {
+    return <DashboardCardSkeleton title="Cumulative PnL" className="min-h-[400px]" />;
+  }
+
+  if (analyticsError) {
+    return <DashboardError
+      title="Chart Error"
+      message="Failed to load PnL data"
+      onRetry={() => refetch()}
+      className="min-h-[400px]"
+    />;
+  }
+
   // Show loading or empty state
   if (chartData.length === 0) {
     return (
@@ -128,21 +147,19 @@ const CumulativePnLChart = () => {
         <div className="flex rounded border border-border overflow-hidden">
           <button
             onClick={() => setMode("line")}
-            className={`px-3 py-1 text-xs font-medium transition-colors ${
-              mode === "line"
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={`px-3 py-1 text-xs font-medium transition-colors ${mode === "line"
+              ? "bg-secondary text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+              }`}
           >
             Line
           </button>
           <button
             onClick={() => setMode("bar")}
-            className={`px-3 py-1 text-xs font-medium transition-colors ${
-              mode === "bar"
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={`px-3 py-1 text-xs font-medium transition-colors ${mode === "bar"
+              ? "bg-secondary text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+              }`}
           >
             Bar
           </button>
@@ -284,11 +301,10 @@ const CumulativePnLChart = () => {
         <div>
           <span className="block">Total PnL</span>
           <span
-            className={`font-mono text-sm font-bold ${
-              chartData[chartData.length - 1]?.pnl >= 0
-                ? "text-profit"
-                : "text-loss"
-            }`}
+            className={`font-mono text-sm font-bold ${chartData[chartData.length - 1]?.pnl >= 0
+              ? "text-profit"
+              : "text-loss"
+              }`}
           >
             ${chartData[chartData.length - 1]?.pnl.toFixed(2)}
           </span>

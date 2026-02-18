@@ -1,3 +1,4 @@
+// app/trades/page.tsx (or wherever your full trade history page is)
 "use client";
 
 import { useState, useMemo } from "react";
@@ -17,7 +18,7 @@ import {
 } from "@/hooks/use-trade-queries";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { TradeRecord } from "@/types";
-import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
+import { formatSide, isBullishSide, formatPrice, formatPnl, formatQuantity } from "@/types";
 import TradeReviewPanel from "@/components/dashboard/trade-review-panel";
 import { getJournalStatus } from "@/data/mockTrades";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,10 @@ const TradeHistoryPage = () => {
   const [activePeriod, setActivePeriod] = useState("All");
   const [selectedTrade, setSelectedTrade] = useState<TradeRecord | null>(null);
   const [dateRange, setDateRange] = useState<{ start?: Date; end?: Date }>({});
+  const [symbolFilter, setSymbolFilter] = useState<string>("All Symbols");
+  const [sideFilter, setSideFilter] = useState<"all" | "long" | "short">("all");
+  const [sortBy, setSortBy] = useState<"date" | "pnl" | "price">("date");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const { connected, publicKey } = useWallet();
   const { exportToCSV, exportToJSON } = useExportTrades();
@@ -47,12 +52,18 @@ const TradeHistoryPage = () => {
   const allTrades = connected ? realTrades : mockTrades;
   const isLoading = connected ? realLoading : mockLoading;
 
-  // Filter trades based on period
+  // FILTER: Only show perp fill orders (discriminator 19)
+  const perpTrades = useMemo(() => {
+    return allTrades.filter(t => t.discriminator === 19 || t.tradeType === "perp");
+  }, [allTrades]);
+
+  // Apply additional filters
   const filteredTrades = useMemo(() => {
-    if (!allTrades.length) return [];
+    if (!perpTrades.length) return [];
 
-    let filtered = [...allTrades];
+    let filtered = [...perpTrades];
 
+    // Time period filter
     if (activePeriod !== "All") {
       const now = new Date();
       const cutoff = new Date();
@@ -66,6 +77,7 @@ const TradeHistoryPage = () => {
       }
     }
 
+    // Date range filter
     if (dateRange.start) {
       filtered = filtered.filter(
         (t) => new Date(t.timestamp) >= dateRange.start!,
@@ -77,8 +89,41 @@ const TradeHistoryPage = () => {
       );
     }
 
+    // Symbol filter
+    if (symbolFilter !== "All Symbols") {
+      filtered = filtered.filter((t) => t.symbol === symbolFilter);
+    }
+
+    // Side filter
+    if (sideFilter !== "all") {
+      filtered = filtered.filter((t) => 
+        sideFilter === "long" 
+          ? (t.side === "long" || t.side === "buy")
+          : (t.side === "short" || t.side === "sell")
+      );
+    }
+
+    // Sorting
+    filtered.sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === "date") {
+        comparison = a.timestamp.getTime() - b.timestamp.getTime();
+      } else if (sortBy === "pnl") {
+        comparison = a.pnl - b.pnl;
+      } else if (sortBy === "price") {
+        comparison = (a.entryPrice || 0) - (b.entryPrice || 0);
+      }
+      return sortOrder === "asc" ? comparison : -comparison;
+    });
+
     return filtered;
-  }, [allTrades, activePeriod, dateRange]);
+  }, [perpTrades, activePeriod, dateRange, symbolFilter, sideFilter, sortBy, sortOrder]);
+
+  // Get unique symbols for filter dropdown
+  const uniqueSymbols = useMemo(() => {
+    const symbols = new Set(perpTrades.map(t => t.symbol));
+    return ["All Symbols", ...Array.from(symbols)];
+  }, [perpTrades]);
 
   const totalPages = Math.ceil(filteredTrades.length / ITEMS_PER_PAGE);
   const paginatedTrades = useMemo(() => {
@@ -93,7 +138,7 @@ const TradeHistoryPage = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `trades-${new Date().toISOString().split("T")[0]}.csv`;
+      a.download = `perp-trades-${new Date().toISOString().split("T")[0]}.csv`;
       a.click();
     } catch (error) {
       console.error("Failed to export CSV:", error);
@@ -107,7 +152,7 @@ const TradeHistoryPage = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `trades-${new Date().toISOString().split("T")[0]}.json`;
+      a.download = `perp-trades-${new Date().toISOString().split("T")[0]}.json`;
       a.click();
     } catch (error) {
       console.error("Failed to export JSON:", error);
@@ -120,7 +165,7 @@ const TradeHistoryPage = () => {
         <div className="rounded-lg border border-border bg-card p-12">
           <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin" />
-            <span>Loading your trades...</span>
+            <span>Loading your perpetual trades...</span>
           </div>
         </div>
       </div>
@@ -133,7 +178,7 @@ const TradeHistoryPage = () => {
         <div className="rounded-lg border border-border bg-card p-12">
           <div className="text-center text-muted-foreground">
             <h3 className="text-lg font-medium mb-2">No Wallet Connected</h3>
-            <p>Connect your wallet to view your trade history</p>
+            <p>Connect your wallet to view your perpetual trade history</p>
             <p className="text-sm mt-4">Demo data will appear when available</p>
           </div>
         </div>
@@ -165,51 +210,64 @@ const TradeHistoryPage = () => {
                 </button>
               ))}
             </div>
-            <div className="hidden sm:flex items-center rounded border border-border px-3 py-1.5 text-sm text-muted-foreground gap-2">
-              <span>mm/dd/yyyy</span>
-              <Clock className="h-3.5 w-3.5" />
-            </div>
           </div>
 
-          <div className="hidden sm:block w-px h-6 bg-border" />
+          <div className="w-px h-6 bg-border" />
 
-          {["All Symbols", "All Sides", "Profitability (All)"].map((label) => (
-            <button
-              key={label}
-              className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary transition-colors"
-            >
-              {label}
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <button className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary transition-colors">
-            Journal Status (A…
+          {/* Symbol filter */}
+          <button
+            className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary transition-colors"
+          >
+            {symbolFilter}
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">
-              <span className="font-mono font-bold text-foreground">
-                {filteredTrades.length.toLocaleString()}
-              </span>{" "}
-              <span className="text-xs">Trades Found</span>
-            </span>
-            <button className="rounded bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-primary-foreground hover:opacity-90 transition-opacity">
-              Apply Filters
-            </button>
-          </div>
-        </div>
-      </div>
+          {symbolFilter === "All Symbols" && (
+            <div className="absolute mt-8 bg-card border border-border rounded-lg shadow-lg hidden group-hover:block">
+              {uniqueSymbols.map(s => (
+                <button
+                  key={s}
+                  className="block w-full text-left px-4 py-2 text-sm hover:bg-secondary"
+                  onClick={() => setSymbolFilter(s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
 
-      {/* Table */}
-      <div className="rounded-lg border border-border bg-card">
-        <div className="flex items-center justify-between p-5 pb-3">
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold text-sm text-foreground">
-              Full Trade History
-            </h3>
+          {/* Side filter */}
+          <button
+            className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary transition-colors"
+          >
+            {sideFilter === "all" ? "All Sides" : sideFilter === "long" ? "Long Only" : "Short Only"}
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+
+          {/* Sort controls */}
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="rounded border border-border px-3 py-1.5 text-sm bg-transparent"
+          >
+            <option value="date">Sort by Date</option>
+            <option value="pnl">Sort by PnL</option>
+            <option value="price">Sort by Price</option>
+          </select>
+
+          <button
+            onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}
+            className="px-2 py-1.5 text-sm border border-border rounded"
+          >
+            {sortOrder === "asc" ? "↑" : "↓"}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-muted-foreground">
+            <span className="font-mono font-bold text-foreground">
+              {filteredTrades.length.toLocaleString()}
+            </span>{" "}
+            <span className="text-xs">Perpetual Trades Found</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -230,6 +288,18 @@ const TradeHistoryPage = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Table */}
+      <div className="rounded-lg border border-border bg-card">
+        <div className="flex items-center justify-between p-5 pb-3">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-primary" />
+            <h3 className="font-semibold text-sm text-foreground">
+              Perpetual Trade History
+            </h3>
+          </div>
+        </div>
 
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -237,12 +307,14 @@ const TradeHistoryPage = () => {
               <tr className="border-t border-border">
                 {[
                   "Date",
-                  "Asset",
+                  "Symbol",
                   "Side",
-                  "Price",
-                  "Qty",
+                  "Entry Price",
+                  "Exit Price",
+                  "Quantity",
                   "Fees",
                   "PnL",
+                  "ROI %",
                   "Journal",
                 ].map((h) => (
                   <th
@@ -300,17 +372,28 @@ const TradeHistoryPage = () => {
                       {formatPrice(trade.entryPrice)}
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
-                      {trade.quantity.toFixed(2)}
+                      {formatPrice(trade.exitPrice)}
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
+                      {formatQuantity(trade.quantity)}
+                    </td>
+                    <td className="px-5 py-3.5 font-mono text-sm text-loss">
                       -${Math.abs(trade.fees.total).toFixed(2)}
                     </td>
                     <td
-                      className={`px-5 py-3.5 font-mono text-sm font-medium ${
+                      className={`px-5 py-3.5 font-mono text-sm font-bold ${
                         trade.pnl >= 0 ? "text-profit" : "text-loss"
                       }`}
                     >
                       {formatPnl(trade.pnl)}
+                    </td>
+                    <td
+                      className={`px-5 py-3.5 font-mono text-sm ${
+                        trade.pnl >= 0 ? "text-profit" : "text-loss"
+                      }`}
+                    >
+                      {trade.pnlPercentage >= 0 ? "+" : ""}
+                      {trade.pnlPercentage.toFixed(2)}%
                     </td>
                     <td className="px-5 py-3.5">
                       {journalStatus === "journaled" ? (
@@ -321,7 +404,7 @@ const TradeHistoryPage = () => {
                       ) : journalStatus === "missing" ? (
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-loss/30 bg-loss/10 px-3 py-0.5 text-xs text-loss">
                           <span className="h-1.5 w-1.5 rounded-full bg-loss" />
-                          Missing Entry
+                          Missing
                         </span>
                       ) : null}
                     </td>

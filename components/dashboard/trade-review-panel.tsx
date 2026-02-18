@@ -26,6 +26,12 @@ interface TradeReviewPanelProps {
 const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
   const isProfitable = trade.pnl >= 0;
   const bullish = isBullishSide(trade.side);
+
+   // Only show if it's a perp trade
+  if (trade.discriminator !== 19 && trade.tradeType !== "perp") {
+    return null;
+  }
+
   const {
     data: aiReview,
     isLoading: aiLoading,

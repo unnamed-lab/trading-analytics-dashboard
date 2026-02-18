@@ -12,10 +12,11 @@
     "test:fetcher": "tsx scripts/fetch-data.script.ts all",
     "test:fetcher:full": "tsx scripts/fetch-data.script.ts full",
     "test:fetcher:instrument": "tsx scripts/fetch-data.script.ts instrument",
-    "test:analytics": "tsx scripts/trade-analytics.script.ts"
+    "test:analytics": "tsx scripts/trade-analytics.script.ts",
+    "debug:kit": "tsx scripts/debug-deriverse-kit.ts"
   },
   "dependencies": {
-    "@deriverse/kit": "^1.0.39",
+    "@deriverse/kit": "1.0.41",
     "@prisma/adapter-pg": "^7.4.0",
     "@prisma/client": "^7.4.0",
     "@solana/codecs-strings": "^6.0.1",
@@ -63,6 +64,7 @@
     "tailwindcss": "^4",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5"
   }

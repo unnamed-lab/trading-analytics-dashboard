@@ -17,7 +17,7 @@ import {
   PerpOrderRevokeReportModel,
 } from "@deriverse/kit";
 import EngineAdapter from "@/lib/deriverse-engine-adapter";
-import { TradeRecord } from "@/types";
+import { TradeRecord, FinancialDetails } from "@/types";
 import { PnLCalculator } from "@/services/pnl-calculator.service";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -331,6 +331,262 @@ export class TransactionDataFetcher {
     }
   }
 
+  /**
+   * NEW METHOD: Extract comprehensive financial details from ALL transactions
+   * This processes every transaction type to gather:
+   * - Total fees paid (protocol + network)
+   * - Funding payments received/paid
+   * - Deposits and withdrawals
+   * - Account balance changes
+   */
+  async extractFinancialDetails(): Promise<FinancialDetails> {
+    if (!this.walletPublicKey) {
+      throw new Error("Wallet not initialized");
+    }
+
+    console.log("\n💰 Extracting comprehensive financial details...");
+
+    const financials: FinancialDetails = {
+      totalProtocolFees: 0,
+      totalNetworkFees: 0,
+      totalFees: 0,
+      totalFundingReceived: 0,
+      totalFundingPaid: 0,
+      netFunding: 0,
+      totalDeposits: 0,
+      totalWithdrawals: 0,
+      netDeposits: 0,
+      socializedLosses: 0,
+      feeBreakdown: {
+        spotFees: 0,
+        perpFees: 0,
+        makerRebates: 0,
+        takerFees: 0,
+      },
+      fundingBreakdown: new Map<string, number>(), // symbol -> net funding
+      dailySummary: new Map<string, any>(), // date -> daily totals
+    };
+
+    try {
+      // Fetch all signatures
+      const signaturesResponse = await this.fetchWithRetries(() =>
+        this.rpc
+          .getSignaturesForAddress(address(this.walletPublicKey!.toString()), {
+            limit: this.maxTransactions,
+          })
+          .send(),
+      );
+
+      const signatures = Array.isArray(signaturesResponse)
+        ? signaturesResponse
+        : signaturesResponse?.values || [];
+
+      if (!signatures.length) {
+        console.log("❌ No transactions found for financial extraction");
+        return financials;
+      }
+
+      console.log(`✅ Found ${signatures.length} transactions to analyze`);
+
+      // Filter for program-related transactions
+      const relevantTransactions = await this.filterProgramSignatures(signatures);
+      console.log(`📊 Analyzing ${relevantTransactions.length} program transactions`);
+
+      for (const { sigInfo, tx } of relevantTransactions) {
+        try {
+          const txFinancials = await this.extractTxFinancialDetails(sigInfo, tx);
+
+          // Aggregate totals
+          financials.totalProtocolFees += txFinancials.protocolFees;
+          financials.totalNetworkFees += txFinancials.networkFee;
+          financials.totalFees += txFinancials.protocolFees + txFinancials.networkFee;
+
+          financials.totalFundingReceived += txFinancials.fundingReceived;
+          financials.totalFundingPaid += txFinancials.fundingPaid;
+
+          financials.totalDeposits += txFinancials.deposits;
+          financials.totalWithdrawals += txFinancials.withdrawals;
+
+          financials.socializedLosses += txFinancials.socializedLoss;
+
+          // Fee breakdown
+          financials.feeBreakdown.spotFees += txFinancials.spotFees;
+          financials.feeBreakdown.perpFees += txFinancials.perpFees;
+          financials.feeBreakdown.makerRebates += txFinancials.makerRebates;
+          financials.feeBreakdown.takerFees += txFinancials.takerFees;
+
+          // Funding breakdown by symbol
+          for (const [symbol, amount] of txFinancials.fundingBySymbol) {
+            const current = financials.fundingBreakdown.get(symbol) || 0;
+            financials.fundingBreakdown.set(symbol, current + amount);
+          }
+
+          // Daily summary
+          const date = new Date(Number(sigInfo.blockTime) * 1000).toISOString().split('T')[0];
+          const daily = financials.dailySummary.get(date) || {
+            date,
+            fees: 0,
+            funding: 0,
+            deposits: 0,
+            withdrawals: 0,
+            trades: 0,
+          };
+          daily.fees += txFinancials.protocolFees + txFinancials.networkFee;
+          daily.funding += txFinancials.fundingReceived - txFinancials.fundingPaid;
+          daily.deposits += txFinancials.deposits;
+          daily.withdrawals += txFinancials.withdrawals;
+          daily.trades += txFinancials.tradeCount;
+          financials.dailySummary.set(date, daily);
+
+        } catch (error: any) {
+          console.warn(`⚠️ Failed to extract financials from tx: ${error.message}`);
+        }
+        await this.delay(5);
+      }
+
+      // Calculate net values
+      financials.netFunding = financials.totalFundingReceived - financials.totalFundingPaid;
+      financials.netDeposits = financials.totalDeposits - financials.totalWithdrawals;
+
+      // Convert Maps to arrays for easier consumption
+      financials.fundingBreakdownArray = Array.from(financials.fundingBreakdown.entries())
+        .map(([symbol, amount]) => ({ symbol, amount }))
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+
+      financials.dailySummaryArray = Array.from(financials.dailySummary.values())
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      console.log("\n✅ Financial extraction complete:");
+      console.log(`   Total Fees: ${financials.totalFees.toFixed(6)} USDC`);
+      console.log(`   Net Funding: ${financials.netFunding.toFixed(6)} USDC`);
+      console.log(`   Net Deposits: ${financials.netDeposits.toFixed(6)} USDC`);
+
+      return financials;
+
+    } catch (error: any) {
+      console.error("Error extracting financial details:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Extract financial details from a single transaction
+   */
+  private async extractTxFinancialDetails(sigInfo: any, tx: any): Promise<{
+    protocolFees: number;
+    networkFee: number;
+    fundingReceived: number;
+    fundingPaid: number;
+    deposits: number;
+    withdrawals: number;
+    socializedLoss: number;
+    spotFees: number;
+    perpFees: number;
+    makerRebates: number;
+    takerFees: number;
+    fundingBySymbol: Map<string, number>;
+    tradeCount: number;
+  }> {
+    const result = {
+      protocolFees: 0,
+      networkFee: 0,
+      fundingReceived: 0,
+      fundingPaid: 0,
+      deposits: 0,
+      withdrawals: 0,
+      socializedLoss: 0,
+      spotFees: 0,
+      perpFees: 0,
+      makerRebates: 0,
+      takerFees: 0,
+      fundingBySymbol: new Map<string, number>(),
+      tradeCount: 0,
+    };
+
+    const logMessages: string[] = tx.meta?.logMessages ?? [];
+    if (!logMessages.length) return result;
+
+    // Network fee (SOL in lamports converted to USDC equivalent - using SOL price)
+    const rawFee = tx.meta?.fee || 0;
+    result.networkFee = Number(rawFee) / 1e9; // SOL amount
+
+    if (this.engineInitialized && this.engine) {
+      try {
+        const decodedEvents = await (this.engine as any).logsDecode(logMessages);
+
+        for (const event of decodedEvents) {
+          const tag = event.tag;
+
+          // Protocol fees (tag 15 = spotFees, tag 23 = perpFees)
+          if (tag === 15 || tag === 23) {
+            const feeAmount = Math.abs(toNum(event.fees || 0));
+            result.protocolFees += feeAmount;
+
+            if (tag === 15) {
+              result.spotFees += feeAmount;
+            } else {
+              result.perpFees += feeAmount;
+            }
+          }
+
+          // Rebates (negative fees)
+          if (event.rebates) {
+            const rebateAmount = Math.abs(toNum(event.rebates));
+            result.makerRebates += rebateAmount;
+            result.protocolFees -= rebateAmount;
+          }
+
+          // Funding payments (tag 16 = perpFunding)
+          if (tag === 16) {
+            const fundingAmount = toNum(event.funding);
+            if (fundingAmount > 0) {
+              result.fundingReceived += fundingAmount;
+            } else {
+              result.fundingPaid += Math.abs(fundingAmount);
+            }
+
+            // Track by symbol
+            const instrId = toNum(event.instrId);
+            const details = await this.resolveInstrumentDetails(instrId);
+            const symbol = details.symbol || `PERP-${instrId}`;
+
+            const current = result.fundingBySymbol.get(symbol) || 0;
+            result.fundingBySymbol.set(symbol, current + fundingAmount);
+          }
+
+          // Socialized loss (tag 20 = perpSocLoss)
+          if (tag === 20) {
+            result.socializedLoss += Math.abs(toNum(event.socLoss));
+          }
+
+          // Deposits (tag 0 = deposit, tag 7 = perpDeposit)
+          if (tag === 0 || tag === 7) {
+            result.deposits += Math.abs(toNum(event.amount));
+          }
+
+          // Withdrawals (tag 1 = withdraw)
+          if (tag === 1) {
+            result.withdrawals += Math.abs(toNum(event.amount));
+          }
+
+          // Count trades (tag 19 = perpFillOrder)
+          if (tag === 19) {
+            result.tradeCount++;
+          }
+
+          // Taker fees can be inferred from fills
+          if (tag === 19 && event.fees) {
+            result.takerFees += Math.abs(toNum(event.fees));
+          }
+        }
+      } catch (_) {
+        // ignore decode errors
+      }
+    }
+
+    return result;
+  }
+
   filterTrades(
     trades: TradeRecord[],
     filters: {
@@ -429,7 +685,7 @@ export class TransactionDataFetcher {
    * PnLCalculator (they are not open/close fill pairs).
    */
   private static readonly FIXED_PNL_LOG_TYPES = new Set([
-    "spotFees",
+    // "spotFees",
     "perpFees",
     "perpFunding",
     "perpSocLoss",
@@ -706,9 +962,9 @@ export class TransactionDataFetcher {
         }
       });
 
-      // Count actual trade fills in this transaction
+      // Count actual trade fills in this transaction — only perp (19) now
       const tradeFillEvents = decodedEvents.filter(
-        (e: any) => e.tag === 11 || e.tag === 19, // spotFillOrder (11) or perpFillOrder (19)
+        (e: any) => e.tag === 19, // perpFillOrder (19)
       );
 
       const feeDistribution = this.distributeFees(
@@ -722,329 +978,90 @@ export class TransactionDataFetcher {
         const uniqueId = `${signature}-${tradeRecords.length}`;
 
         switch (tag) {
-          // ── Deposit ───────────────────────────────────────────────────
-          case LogType.deposit: {
-            const deposit = event as DepositReportModel;
-            const tokenId = toNum(deposit.tokenId);
-            const tokenSymbol = this.getTokenSymbol(tokenId);
-            const amount = toNum(deposit.amount);
-            console.log("Deposit:: ", deposit);
+          // ── ONLY PERP FILLS ARE ACTIVE ────────────────────────────────
+          // All other event types are commented out to ensure only filled trades are returned
 
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol: tokenSymbol,
-              side: "buy",
-              instrument: `${tokenSymbol}/USD`,
-              entryPrice: 0,
-              exitPrice: 0,
-              quantity: amount,
-              amount,
-              value: amount,
-              orderType: "deposit",
-              clientId: toStr(deposit.clientId) || "unknown",
-              orderId: "N/A",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
-              pnl: 0,
-              pnlPercentage: 0,
-              duration: 0,
-              status: "breakeven",
-              notes: `Deposit ${amount} ${tokenSymbol}`,
-              tradeType: "spot",
-              logType: "deposit",
-              discriminator: tag,
-            });
-            break;
-          }
+          /* ── DEPOSIT ───────────────────────────────────────────────────
+          case LogType.deposit: { ... } */
 
-          // ── Withdraw ──────────────────────────────────────────────────
-          case LogType.withdraw: {
-            const withdraw = event as WithdrawReportModel;
-            const tokenId = toNum(withdraw.tokenId);
-            const tokenSymbol = this.getTokenSymbol(tokenId);
-            const amount = toNum(withdraw.amount);
-            console.log("Withdraw:: ", event);
+          /* ── WITHDRAW ──────────────────────────────────────────────────
+          case LogType.withdraw: { ... } */
 
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol: tokenSymbol,
-              side: "sell",
-              instrument: `${tokenSymbol}/USD`,
-              entryPrice: 0,
-              exitPrice: 0,
-              quantity: amount,
-              amount,
-              value: 0,
-              orderType: "withdraw",
-              clientId: toStr(withdraw.clientId) || "unknown",
-              orderId: "N/A",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
-              pnl: 0,
-              pnlPercentage: 0,
-              duration: 0,
-              status: "breakeven",
-              notes: `Withdraw ${amount} ${tokenSymbol}`,
-              tradeType: "spot",
-              logType: "withdraw",
-              discriminator: tag,
-            });
-            break;
-          }
+          /* ── PERP DEPOSIT ──────────────────────────────────────────────
+          case LogType.perpDeposit: { ... } */
 
-          // ── Perp Deposit ──────────────────────────────────────────────
-          case LogType.perpDeposit: {
-            const perpDeposit = event as any;
-            const instrId = toNum(perpDeposit.instrId);
-            const instrumentSymbol = this.getInstrumentSymbol(instrId);
-            const amount = toNum(perpDeposit.amount);
-            const perpDetails = await this.resolveInstrumentDetails(instrId);
-            const symbol = perpDetails.symbol || instrumentSymbol;
-            console.log("PerpDeposit:: ", event);
+          /* ── SPOT PLACE ORDER ──────────────────────────────────────────
+          case LogType.spotPlaceOrder: { ... } */
 
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol,
-              side: "buy",
-              instrument: symbol,
-              entryPrice: 0,
-              exitPrice: 0,
-              quantity: amount,
-              amount,
-              value: 0,
-              orderType: "deposit",
-              clientId: toStr(perpDeposit.clientId) || "unknown",
-              orderId: "N/A",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
-              pnl: 0,
-              pnlPercentage: 0,
-              duration: 0,
-              status: "breakeven",
-              notes: `Perp Deposit ${amount} to ${symbol}`,
-              tradeType: "perp",
-              logType: "perpDeposit",
-              discriminator: tag,
-            });
-            break;
-          }
-
-          // ── Spot Place Order ──────────────────────────────────────────
-          case LogType.spotPlaceOrder: {
-            const placeOrder = event as any;
-            const instrId = toNum(placeOrder.instrId);
-            const instrumentSymbol = this.getInstrumentSymbol(instrId);
-            const details = await this.resolveInstrumentDetails(instrId);
-            const symbol = details.symbol || instrumentSymbol;
-            const side = placeOrder.side === 0 ? "buy" : "sell";
-            const quantity = toNum(placeOrder.qty);
-            const price = toNum(placeOrder.price);
-            console.log("SpotPlaceOrder:: ", event);
-
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol,
-              side: side as "buy" | "sell",
-              instrument: symbol,
-              entryPrice: price,
-              exitPrice: price,
-              quantity,
-              amount: quantity,
-              value: price * quantity,
-              orderType: placeOrder.orderType === 1 ? "limit" : "market",
-              clientId: toStr(placeOrder.clientId) || "unknown",
-              orderId: toStr(placeOrder.orderId) || "unknown",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
-              pnl: 0,
-              pnlPercentage: 0,
-              duration: 0,
-              status: "open",
-              notes: `Place ${side === "buy" ? "Buy" : "Sell"} Order for ${quantity} ${symbol} @ ${price}`,
-              tradeType: "spot",
-              logType: "spotPlaceOrder",
-              discriminator: tag,
-            });
-            break;
-          }
-
-          // ── Spot Fill (Trade) — discriminator 11 ─────────────────────
+          /* ── SPOT FILL ─────────────────────────────────────────────────
           case LogType.spotFillOrder: {
-            const fill = event as SpotFillOrderReportModel;
-            const symbol = "SOL";
+            const spotFill = event as SpotFillOrderReportModel;
+            const instrId = toNum(spotFill.instrId);
+            const details = await this.resolveInstrumentDetails(instrId);
+            const symbol = details.symbol;
 
-            const side = fill.side === 0 ? "buy" : "sell";
-            const quantity = toNum(fill.qty);
-            const price = toNum(fill.price);
-
-            // Calculate amount safely, handling undefined price
-            let amount = 0;
-            if (price && !isNaN(price) && price > 0) {
-              amount = quantity * price;
-            } else {
-              // Fallback to crncy field if price is invalid
-              amount = toNum((fill as any).crncy);
-            }
-
-            const rebates = fill.rebates ? -toNum(fill.rebates) : 0;
+            const isBuy = spotFill.side === 0;
+            const quantity = toNum(spotFill.qty);
+            const price = toNum(spotFill.price);
+            const amount = quantity * price;
 
             const fillIndex = tradeFillEvents.indexOf(event);
             const tradeFee = feeDistribution.get(fillIndex) || 0;
 
-            console.log("SpotFillOrder:: ", event);
-
             tradeRecords.push({
               id: uniqueId,
               timestamp: blockTs,
               section: this.formatSection(blockTs),
               symbol,
-              side: side as "buy" | "sell",
+              side: isBuy ? "buy" : "sell",
               instrument: symbol,
-              entryPrice: price || 0,
-              exitPrice: price || 0,
+              entryPrice: price,
+              exitPrice: price,
               quantity,
               amount,
               value: amount,
-              orderType: "market",
-              clientId: toStr(fill.clientId) || "unknown",
-              orderId: toStr(fill.orderId) || "unknown",
+              orderType: "limit",
+              clientId: toStr(spotFill.clientId) || "unknown",
+              orderId: toStr(spotFill.orderId) || "unknown",
               transactionHash: signature,
               fees: {
                 maker: 0,
                 taker: 0,
                 total: tradeFee,
-                rebates,
               },
               pnl: 0,
               pnlPercentage: 0,
               duration: 0,
               status: "breakeven",
-              notes: `${side === "buy" ? "Bought" : "Sold"} ${quantity.toFixed(6)} ${symbol} @ ${price || 0}`,
+              notes: `Spot ${isBuy ? "Buy" : "Sell"} Fill — ${quantity.toFixed(6)} ${symbol.split("/")[0]} @ ${price}`,
               tradeType: "spot",
-              logType: "spotFillOrder",
-              discriminator: tag,
             });
             break;
-          }
+          } */
 
-          // ── Spot New Order ────────────────────────────────────────────
-          case LogType.spotNewOrder: {
-            const newOrder = event as any;
-            const symbol = "SOL";
-            const side = newOrder.side === 0 ? "buy" : "sell";
-            const quantity = toNum(newOrder.qty);
-            const crncyValue = toNum(newOrder.crncy);
-            const price = quantity > 0 ? crncyValue / quantity : 0;
-            console.log("SpotNewOrder:: ", event);
+          /* ── SPOT NEW ORDER ────────────────────────────────────────────
+          case LogType.spotNewOrder: { ... } */
 
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol,
-              side: side as "buy" | "sell",
-              instrument: symbol,
-              entryPrice: price,
-              exitPrice: price,
-              quantity,
-              amount: quantity,
-              value: crncyValue,
-              orderType: "new",
-              clientId: "unknown",
-              orderId: "unknown",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
-              pnl: 0,
-              pnlPercentage: 0,
-              duration: 0,
-              status: "open",
-              notes: `New ${side} Order`,
-              tradeType: "spot",
-              logType: "spotNewOrder",
-              discriminator: tag,
-            });
-            break;
-          }
+          /* ── SPOT FEES ─────────────────────────────────────────────────
+          case LogType.spotFees: { ... } */
 
-          // ── Spot Fees ─────────────────────────────────────────────────
-          case LogType.spotFees: {
-            const fees = event as SpotFeesReportModel;
-            const feeAmount = toNum(fees.fees);
-            const refPayment = toNum(fees.refPayment);
-            console.log("SpotFees:: ", event);
-
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol: "SOL",
-              side: "sell",
-              instrument: "Fees",
-              entryPrice: 0,
-              exitPrice: 0,
-              quantity: feeAmount,
-              amount: feeAmount,
-              value: feeAmount,
-              orderType: "fee",
-              clientId: toStr(fees.refClientId) || "unknown",
-              orderId: "N/A",
-              transactionHash: signature,
-              fees: {
-                maker: 0,
-                taker: 0,
-                total: feeAmount,
-                rebates: refPayment,
-              },
-              pnl: -feeAmount,
-              pnlPercentage: 0,
-              duration: 0,
-              status: feeAmount > 0 ? "loss" : "breakeven",
-              notes: `Trading Fees: ${feeAmount} USDC, Ref Payment: ${refPayment.toFixed(6)}`,
-              tradeType: "spot",
-              logType: "spotFees",
-              discriminator: tag,
-            });
-            break;
-          }
-
-          // ── Perp Fill — discriminator 19 ──────────────────────────────
+          // ── PERP FILL — discriminator 19 ──────────────────────────────
           case LogType.perpFillOrder: {
             const perpFill = event as PerpFillOrderReportModel;
-            const instrId =
-              this.extractInstrumentId(perpFill) ??
-              toNum((perpFill as any).instrId);
-            const details = await this.resolveInstrumentDetails(instrId);
-            const symbol =
-              details.symbol ||
-              (instrId !== undefined ? `PERP-${instrId}` : "PERP-UNKNOWN");
+            const symbol = "SOL";
 
             const isLong = perpFill.side === 0;
             const quantity = toNum(perpFill.perps);
             const price = toNum(perpFill.price);
 
             // Calculate amount safely, handling undefined price
-            let amount = 0;
-            if (price && !isNaN(price) && price > 0) {
-              amount = quantity * price;
-            } else {
-              // Fallback to crncy field if price is invalid
-              amount = toNum((perpFill as any).crncy);
-            }
-
+            let amount = perpFill.perps;
             const rebates = perpFill.rebates ? -toNum(perpFill.rebates) : 0;
 
             const fillIndex = tradeFillEvents.indexOf(event);
             const tradeFee = feeDistribution.get(fillIndex) || 0;
 
-            console.log("PerpFillOrder:: ", event);
+            // console.log("PerpFillOrder:: ", event); // Commented out for production
 
             tradeRecords.push({
               id: uniqueId,
@@ -1080,167 +1097,17 @@ export class TransactionDataFetcher {
             break;
           }
 
-          // ── Perp Funding ──────────────────────────────────────────────
-          case LogType.perpFunding: {
-            const funding = event as PerpFundingReportModel;
-            const instrId =
-              this.extractInstrumentId(funding) ?? toNum(funding.instrId);
-            const details = await this.resolveInstrumentDetails(instrId);
-            const symbol = details.symbol || `PERP-${instrId}`;
-            const fundingValue = toNum(funding.funding);
-            console.log("PerpFunding:: ", event);
+          /* ── PERP FUNDING ──────────────────────────────────────────────
+          case LogType.perpFunding: { ... } */
 
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol,
-              side: fundingValue >= 0 ? "long" : "short",
-              instrument: symbol,
-              entryPrice: 0,
-              exitPrice: 0,
-              quantity: 0,
-              amount: Math.abs(fundingValue),
-              value: Math.abs(fundingValue),
-              orderType: "funding",
-              clientId: toStr(funding.clientId) || "unknown",
-              orderId: "N/A",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
-              pnl: fundingValue,
-              pnlPercentage: 0,
-              duration: 0,
-              status: fundingValue > 0 ? "win" : "loss",
-              notes: `${fundingValue > 0 ? "Received" : "Paid"} Funding: ${Math.abs(fundingValue)} USDC`,
-              tradeType: "perp",
-              fundingPayments: fundingValue,
-              logType: "perpFunding",
-              discriminator: tag,
-            });
-            break;
-          }
+          /* ── PERP FEES ─────────────────────────────────────────────────
+          case LogType.perpFees: { ... } */
 
-          // ── Perp Fees ─────────────────────────────────────────────────
-          case LogType.perpFees: {
-            const perpFees = event as PerpFeesReportModel;
-            const feeAmount = toNum((perpFees as any).fees);
-            console.log("PerpFees:: ", event);
+          /* ── PERP SOCIALIZED LOSS ──────────────────────────────────────
+          case LogType.perpSocLoss: { ... } */
 
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol: "SOL",
-              side: "sell",
-              instrument: "Perp Fees",
-              entryPrice: 0,
-              exitPrice: 0,
-              quantity: feeAmount,
-              amount: feeAmount,
-              value: feeAmount,
-              orderType: "fee",
-              clientId: toStr((perpFees as any).clientId) || "unknown",
-              orderId: "N/A",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: feeAmount, rebates: 0 },
-              pnl: -feeAmount,
-              pnlPercentage: 0,
-              duration: 0,
-              status: feeAmount > 0 ? "loss" : "breakeven",
-              notes: `Perp Trading Fees: ${feeAmount} USDC`,
-              tradeType: "perp",
-              logType: "perpFees",
-              discriminator: tag,
-            });
-            break;
-          }
-
-          // ── Perp Socialized Loss ──────────────────────────────────────
-          case LogType.perpSocLoss: {
-            const socLoss = event as PerpSocLossReportModel;
-            const instrId = toNum(socLoss.instrId);
-            const details = await this.resolveInstrumentDetails(instrId);
-            const symbol = details.symbol || `PERP-${instrId}`;
-            const lossValue = toNum(socLoss.socLoss);
-            console.log("Perp Socialized Loss:: ", event);
-
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol,
-              side: "short",
-              instrument: symbol,
-              entryPrice: 0,
-              exitPrice: 0,
-              quantity: 0,
-              amount: Math.abs(lossValue),
-              value: Math.abs(lossValue),
-              orderType: "socLoss",
-              clientId: toStr(socLoss.clientId) || "unknown",
-              orderId: "N/A",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
-              pnl: -lossValue,
-              pnlPercentage: 0,
-              duration: 0,
-              status: "loss",
-              notes: `Socialized Loss: ${lossValue} USDC`,
-              tradeType: "perp",
-              socializedLoss: lossValue,
-              logType: "perpSocLoss",
-              discriminator: tag,
-            });
-            break;
-          }
-
-          // ── Spot / Perp Order Revoke ──────────────────────────────────
-          case LogType.spotOrderRevoke:
-          case LogType.perpOrderRevoke: {
-            const revoke = event as SpotOrderRevokeReportModel;
-            const isPerp = tag === LogType.perpOrderRevoke;
-            const instrId =
-              this.extractInstrumentId(event) ?? toNum((event as any).instrId);
-            const details = await this.resolveInstrumentDetails(instrId);
-            const symbol =
-              details.symbol ||
-              (instrId !== undefined
-                ? isPerp
-                  ? `PERP-${instrId}`
-                  : this.getInstrumentSymbol(instrId)
-                : "UNKNOWN");
-            const quantity = toNum(revoke.qty);
-            const price = toNum((revoke as any).price);
-            console.log(isPerp ? "Perp" : "Spot", "OrderRevoked:: ", event);
-
-            tradeRecords.push({
-              id: uniqueId,
-              timestamp: blockTs,
-              section: this.formatSection(blockTs),
-              symbol,
-              side: "sell",
-              instrument: symbol,
-              entryPrice: price,
-              exitPrice: price,
-              quantity,
-              amount: quantity,
-              value: quantity * price,
-              orderType: "revoke",
-              clientId: toStr(revoke.clientId) || "unknown",
-              orderId: toStr(revoke.orderId) || "unknown",
-              transactionHash: signature,
-              fees: { maker: 0, taker: 0, total: 0, rebates: 0 },
-              pnl: 0,
-              pnlPercentage: 0,
-              duration: 0,
-              status: "breakeven",
-              notes: `${isPerp ? "Perp" : "Spot"} Order Revoked`,
-              tradeType: isPerp ? "perp" : "spot",
-              logType: isPerp ? "perpOrderRevoke" : "spotOrderRevoke",
-              discriminator: tag,
-            });
-            break;
-          }
+          /* ── PERP ORDER REVOKE ─────────────────────────────────────────
+          case LogType.perpOrderRevoke: { ... } */
 
           default:
             break;

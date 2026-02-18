@@ -367,3 +367,52 @@ export function formatPnl(pnl: number): string {
   const prefix = pnl >= 0 ? "+" : "";
   return `${prefix}$${Math.abs(pnl).toFixed(2)}`;
 }
+
+
+export interface FinancialDetails {
+  // Fee totals
+  totalProtocolFees: number;      // Fees paid to protocol (USDC)
+  totalNetworkFees: number;        // SOL network fees (converted to USDC)
+  totalFees: number;               // Total fees (protocol + network)
+  
+  // Funding payments
+  totalFundingReceived: number;    // Positive funding received
+  totalFundingPaid: number;        // Negative funding paid
+  netFunding: number;              // Net funding PnL
+  
+  // Deposits/Withdrawals
+  totalDeposits: number;
+  totalWithdrawals: number;
+  netDeposits: number;             // Net capital inflow
+  
+  // Losses
+  socializedLosses: number;        // Total socialized losses
+  
+  // Detailed breakdowns
+  feeBreakdown: {
+    spotFees: number;
+    perpFees: number;
+    makerRebates: number;
+    takerFees: number;
+  };
+  
+  fundingBreakdown: Map<string, number>;        // Symbol -> net funding
+  fundingBreakdownArray?: Array<{ symbol: string; amount: number }>;
+  
+  dailySummary: Map<string, {                    // Date -> daily totals
+    date: string;
+    fees: number;
+    funding: number;
+    deposits: number;
+    withdrawals: number;
+    trades: number;
+  }>;
+  dailySummaryArray?: Array<{
+    date: string;
+    fees: number;
+    funding: number;
+    deposits: number;
+    withdrawals: number;
+    trades: number;
+  }>;
+}

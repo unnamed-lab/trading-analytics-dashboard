@@ -1,14 +1,16 @@
-import { TradeRecord } from "@/types";
+import { TradeRecord, FinancialDetails } from "@/types";
 import { PnLCalculator } from "./pnl-calculator.service";
 
 export class TradeAnalyticsCalculator {
   private trades: TradeRecord[];
   private pnlCalculatedTrades: TradeRecord[];
+  private financials: FinancialDetails | null;
 
-  constructor(trades: TradeRecord[]) {
+  constructor(trades: TradeRecord[], financials?: FinancialDetails) {
     this.trades = trades.sort(
       (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
     );
+    this.financials = financials || null;
 
     // Calculate PnL for fill trades
     const calculator = new PnLCalculator(trades);
@@ -28,12 +30,20 @@ export class TradeAnalyticsCalculator {
   calculateCoreMetrics() {
     const trades = this.pnlCalculatedTrades;
 
-    const totalPnL = trades.reduce((sum, t) => sum + t.pnl, 0);
+    const totalPnL = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
     const totalVolume = trades.reduce(
       (sum, t) => sum + t.entryPrice * t.quantity,
       0,
     );
-    const totalFees = trades.reduce((sum, t) => sum + (t.fees?.total || 0), 0);
+
+    // Use extracted financials if available, otherwise fallback to trade aggregation
+    const totalFees = this.financials
+      ? this.financials.totalFees
+      : trades.reduce((sum, t) => sum + (t.fees?.total || 0), 0);
+
+    const totalFunding = this.financials
+      ? this.financials.totalFundingReceived - this.financials.totalFundingPaid
+      : trades.reduce((sum, t) => sum + (t.fundingPayments || 0), 0);
 
     const winningTrades = trades.filter((t) => t.pnl > 1e-12).length;
     const losingTrades = trades.filter((t) => t.pnl < -1e-12).length;
@@ -44,7 +54,9 @@ export class TradeAnalyticsCalculator {
       totalPnL,
       totalVolume,
       totalFees,
-      netPnL: totalPnL - totalFees,
+      totalFunding,
+      netPnL: totalPnL - totalFees + totalFunding,
+      netDeposits: this.financials?.netDeposits || 0,
       totalTrades: trades.length,
       winningTrades,
       losingTrades,
@@ -132,7 +144,7 @@ export class TradeAnalyticsCalculator {
     }> = [];
 
     for (const trade of this.pnlCalculatedTrades) {
-      cumulative += trade.pnl;
+      cumulative += (trade.pnl || 0);
 
       if (cumulative > peak) {
         peak = cumulative;
@@ -161,10 +173,34 @@ export class TradeAnalyticsCalculator {
    * Generate time series PnL data
    */
   generatePnLTimeSeries() {
-    let cumulative = 0;
+    if (this.financials && this.financials.dailySummaryArray) {
+      let cumulative = 0;
 
+      // We need to combine trade PnL with daily fees/funding
+      // First get daily trade PnL
+      const dailyTradePnL = new Map<string, number>();
+      this.pnlCalculatedTrades.forEach(t => {
+        const date = t.timestamp.toISOString().split('T')[0];
+        dailyTradePnL.set(date, (dailyTradePnL.get(date) || 0) + (t.pnl || 0));
+      });
+
+      return this.financials.dailySummaryArray.map(day => {
+        const tradePnL = dailyTradePnL.get(day.date) || 0;
+        const netDailyPnL = tradePnL - day.fees + day.funding;
+        cumulative += netDailyPnL;
+
+        return {
+          timestamp: new Date(day.date).getTime(),
+          date: day.date,
+          cumulativePnL: cumulative,
+          tradePnL: netDailyPnL,
+        };
+      });
+    }
+
+    let cumulative = 0;
     return this.pnlCalculatedTrades.map((trade) => {
-      cumulative += trade.pnl;
+      cumulative += (trade.pnl || 0);
 
       return {
         timestamp: trade.timestamp.getTime(),
@@ -191,7 +227,7 @@ export class TradeAnalyticsCalculator {
 
     const sessionData = Array.from(sessionMap.entries()).map(
       ([date, dayTrades]) => {
-        const pnl = dayTrades.reduce((sum, t) => sum + t.pnl, 0);
+        const pnl = dayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
         const wins = dayTrades.filter((t) => t.pnl > 1e-12).length;
         const winRate = (wins / dayTrades.length) * 100;
 
@@ -225,13 +261,25 @@ export class TradeAnalyticsCalculator {
    * Calculate fee composition
    */
   calculateFeeComposition() {
-    const spotFees = this.trades
-      .filter((t) => t.tradeType === "spot")
-      .reduce((sum, t) => sum + Math.abs(t.fees?.total || 0), 0);
+    let spotFees = 0;
+    let perpFees = 0;
+    let totalFees = 0;
 
-    const perpFees = this.trades
-      .filter((t) => t.tradeType === "perp")
-      .reduce((sum, t) => sum + Math.abs(t.fees?.total || 0), 0);
+    if (this.financials) {
+      spotFees = this.financials.feeBreakdown.spotFees;
+      perpFees = this.financials.feeBreakdown.perpFees;
+      totalFees = this.financials.totalFees;
+    } else {
+      spotFees = this.trades
+        .filter((t) => t.tradeType === "spot")
+        .reduce((sum, t) => sum + Math.abs(t.fees?.total || 0), 0);
+
+      perpFees = this.trades
+        .filter((t) => t.tradeType === "perp")
+        .reduce((sum, t) => sum + Math.abs(t.fees?.total || 0), 0);
+
+      totalFees = spotFees + perpFees;
+    }
 
     const feesBySymbol = new Map<string, number>();
 
@@ -242,8 +290,6 @@ export class TradeAnalyticsCalculator {
         current + Math.abs(trade.fees?.total || 0),
       );
     });
-
-    const totalFees = spotFees + perpFees;
 
     const feesBySymbolArray = Array.from(feesBySymbol.entries())
       .map(([symbol, fees]) => ({
@@ -258,6 +304,7 @@ export class TradeAnalyticsCalculator {
       perpFees,
       totalFees,
       feesBySymbol: feesBySymbolArray,
+      breakdown: this.financials?.feeBreakdown || null,
     };
   }
 

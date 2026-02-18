@@ -40,7 +40,7 @@ const getFetcher = (rpcUrl: string, programId?: string) => {
     fetcherInstance = new TransactionDataFetcher(
       rpcUrl,
       programId || process.env.NEXT_PUBLIC_PROGRAM_ID,
-      14, // version
+      parseInt(process.env.NEXT_PUBLIC_ENGINE_VERSION || "1", 10), // version from env
       300, // delay
       1000, // max transactions
     );
@@ -173,6 +173,23 @@ export const useAllTrades = (options?: {
 };
 
 // ============================================
+// Financial Details Query
+// ============================================
+export const useFinancialDetails = () => {
+  const { fetcher, publicKey } = useTransactionFetcher();
+
+  return useQuery({
+    queryKey: ["financial-details", publicKey?.toString()],
+    queryFn: async () => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      return fetcher.extractFinancialDetails();
+    },
+    enabled: !!publicKey,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+};
+
+// ============================================
 // Trade Summary Statistics
 // ============================================
 export const useTradeSummary = () => {
@@ -267,16 +284,21 @@ export const useCalculatedPnL = () => {
 // ============================================
 export const useTradeAnalytics = () => {
   const { data: trades = [] } = useAllTrades();
+  const { data: financials } = useFinancialDetails();
   const { publicKey } = useTransactionFetcher();
 
   return useQuery({
-    queryKey: tradeKeys.summary(publicKey?.toString()),
+    queryKey: [
+      ...tradeKeys.summary(publicKey?.toString()),
+      trades.length,
+      !!financials,
+    ],
     queryFn: async () => {
       if (!publicKey) throw new Error("Wallet not connected");
-      const analytics = new TradeAnalyticsCalculator(trades);
+      const analytics = new TradeAnalyticsCalculator(trades, financials);
       return analytics.generateFullReport();
     },
-    enabled: !!publicKey && trades.length > 0,
+    enabled: !!publicKey && (trades.length > 0 || !!financials),
     staleTime: Infinity,
   });
 };

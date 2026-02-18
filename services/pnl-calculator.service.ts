@@ -13,6 +13,7 @@ export class PnLCalculator {
   /**
    * Calculate PnL by matching entry and exit fills using FIFO.
    * Supports both spot (discriminator 11) and perp (discriminator 19) fills.
+   * Updated to only perform PnL matching for perp trades (discriminator 19).
    */
   calculatePnL(): TradeRecord[] {
     const result: TradeRecord[] = [];
@@ -28,9 +29,14 @@ export class PnLCalculator {
     > = new Map();
 
     for (const trade of this.trades) {
-      // Only process fill events
-      if (trade.discriminator !== 11 && trade.discriminator !== 19) {
-        result.push({ ...trade });
+      // Only process perp fill events (discriminator 19)
+      if (trade.discriminator !== 19) {
+        result.push({
+          ...trade,
+          pnl: 0,
+          pnlPercentage: 0,
+          status: "breakeven",
+        });
         continue;
       }
 
@@ -121,15 +127,8 @@ export class PnLCalculator {
         rawPnl = (entryPrice - exitPrice) * matchedQty;
       }
 
-      // Calculate proportional fees
-      const entryFee =
-        (position.trade.fees?.total || 0) *
-        (matchedQty / position.trade.quantity);
-      const exitFee =
-        (exitTrade.fees?.total || 0) * (matchedQty / exitTrade.quantity);
-
-      // Net PnL after fees
-      const pnl = rawPnl - entryFee - exitFee;
+      // Realized PnL is Gross PnL (pre-fees) to match Deriverse site
+      const pnl = rawPnl;
 
       totalPnl += pnl;
       totalExitValue += exitPrice * matchedQty;
@@ -171,8 +170,14 @@ export class PnLCalculator {
       new Map();
 
     for (const trade of this.trades) {
-      if (trade.discriminator !== 11 && trade.discriminator !== 19) {
-        result.push({ ...trade });
+      // Only process perp fill events (discriminator 19)
+      if (trade.discriminator !== 19) {
+        result.push({
+          ...trade,
+          pnl: 0,
+          pnlPercentage: 0,
+          status: "breakeven",
+        });
         continue;
       }
 

@@ -59,8 +59,9 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
         )
         : 0;
 
-    // Calculate account value (assuming initial balance + PnL - fees)
-    const accountValue = Math.max(0, initialBalance + totalPnL - totalFees);
+    // Calculate account value (assuming initial balance + Net PnL + Net Deposits)
+    const netDeposits = analytics?.core?.netDeposits ?? 0;
+    const accountValue = Math.max(0, initialBalance + totalPnL + netDeposits);
 
     // Calculate PnL percentage
     const pnlPercentage =

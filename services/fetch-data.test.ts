@@ -217,12 +217,12 @@ describe('Test the TransactionDataFetcher Class', () => {
         transaction: { signatures: ['sig123'] }
       });
 
-      // Mock logsDecode to return a fill event
+      // Mock logsDecode to return a perp fill event
       mockEngine.logsDecode.mockResolvedValueOnce([{
-        tag: 11, // Spot fill
-        side: 0, // Buy
+        tag: 19, // Perp fill
+        side: 0, // Buy/Long
         price: 100000000000, // 100 * 1e9
-        qty: 5000000000, // 5 * 1e9
+        perps: 5000000000, // 5 * 1e9
         crncy: 1, // SOL/USDC
         rebates: 1000000, // 0.001 * 1e9
         orderId: 12345,
@@ -233,8 +233,8 @@ describe('Test the TransactionDataFetcher Class', () => {
 
       expect(mockEngine.getClientData).toHaveBeenCalled();
       expect(trades.length).toBeGreaterThan(0);
-      expect(trades[0].symbol).toBe('SOL/USDC');
-      expect(trades[0].side).toBe('buy');
+      expect(trades[0].symbol).toBe('SOL');
+      expect(trades[0].side).toBe('long');
       expect(trades[0].entryPrice).toBe(100);
       expect(trades[0].quantity).toBe(5);
 

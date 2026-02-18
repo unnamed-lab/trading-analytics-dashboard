@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "raw.githubusercontent.com", pathname: "/**" },
     ],
   },
+  serverExternalPackages: ['@prisma/client', 'pg'],
 };
 
 export default nextConfig;

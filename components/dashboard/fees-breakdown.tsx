@@ -26,7 +26,35 @@ const FeesBreakdown = () => {
       const fees = analytics.fees;
       const result: FeeData[] = [];
 
-      if (fees.totalFees > 0) {
+      if (fees.breakdown) {
+        if (fees.breakdown.spotFees > 0) {
+          result.push({
+            name: "Spot Fees",
+            value: fees.breakdown.spotFees,
+            color: "hsl(187, 100%, 50%)",
+            type: "trading",
+          });
+        }
+        if (fees.breakdown.perpFees > 0) {
+          result.push({
+            name: "Perp Fees",
+            value: fees.breakdown.perpFees,
+            color: "hsl(280, 100%, 70%)",
+            type: "trading",
+          });
+        }
+        if (fees.breakdown.makerRebates > 0) {
+          result.push({
+            name: "Maker Rebates",
+            value: fees.breakdown.makerRebates,
+            color: "hsl(145, 80%, 45%)",
+            type: "trading",
+          });
+        }
+
+        // Add network fees if we have them from analytics (if we decide to include them in the calculator)
+        // For now, let's stick to these.
+      } else if (fees.totalFees > 0) {
         result.push({
           name: "Trading Fees",
           value: fees.totalFees,

@@ -1,6 +1,8 @@
 generator client {
   provider = "prisma-client"
   output   = "generated/prisma"
+   previewFeatures     = ["driverAdapters", "queryCompiler", "relationJoins"]
+  runtime             = "nodejs"
 }
 
 datasource db {
@@ -11,7 +13,7 @@ model Journal {
   id        String   @id @default(cuid())
   title     String?
   content   String
-  tradeId   String?  // optional association to a trade
+  tradeId   String?  @unique // unique link to a trade
   owner     String   // wallet address of the journal owner (base58)
   symbol    String?
   side      String?
@@ -21,7 +23,16 @@ model Journal {
   tradeTimestamp DateTime?
   tags      String[] @default([])
   aiAnalyzed Boolean   @default(false)
+  
+  // AI Coach & Analytics Fields
+  aiInsights Json?    // Structured AI feedback (performanceCritique, emotionalReview, etc.)
+  riskScore  Float?   // 0-100 risk score based on trade params
+  magicTags  String[] @default([]) // AI-generated tags like #FOMO, #Revenge
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  @@index([owner])
+  @@index([tradeId])
 }
 

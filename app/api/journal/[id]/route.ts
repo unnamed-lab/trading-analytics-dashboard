@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { verifySolanaSignature } from "@/lib/solana-auth";
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 async function requireOwner(request: Request, id: string) {
   const publicKey = request.headers.get("x-solana-publickey");
@@ -42,9 +42,10 @@ async function requireOwner(request: Request, id: string) {
 }
 
 export async function GET(_request: Request, { params }: Params) {
+  const { id } = await params;
   try {
     const journal = await prisma.journal.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
     if (!journal)
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -58,8 +59,9 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 export async function PATCH(request: Request, { params }: Params) {
+  const { id } = await params;
   try {
-    const check = await requireOwner(request, params.id);
+    const check = await requireOwner(request, id);
     if (!check.ok) return check.res;
 
     const body = await request.json();
@@ -78,7 +80,7 @@ export async function PATCH(request: Request, { params }: Params) {
     } = body;
 
     const updated = await prisma.journal.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         title: title ?? undefined,
         content: content ?? undefined,
@@ -104,11 +106,12 @@ export async function PATCH(request: Request, { params }: Params) {
 }
 
 export async function DELETE(request: Request, { params }: Params) {
+  const { id } = await params;
   try {
-    const check = await requireOwner(request, params.id);
+    const check = await requireOwner(request, id);
     if (!check.ok) return check.res;
 
-    await prisma.journal.delete({ where: { id: params.id } });
+    await prisma.journal.delete({ where: { id } });
     return new Response(null, { status: 204 });
   } catch (err) {
     return NextResponse.json(

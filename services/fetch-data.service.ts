@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "dotenv/config";
 import { Signature, address, createSolanaRpc, devnet } from "@solana/kit";
@@ -389,7 +388,7 @@ export class TransactionDataFetcher {
       console.log(`✅ Found ${signatures.length} transactions to analyze`);
 
       // Filter for program-related transactions
-      const relevantTransactions = await this.filterProgramSignatures(signatures);
+      const relevantTransactions = await this.filterProgramSignatures(signatures as any);
       console.log(`📊 Analyzing ${relevantTransactions.length} program transactions`);
 
       for (const { sigInfo, tx } of relevantTransactions) {

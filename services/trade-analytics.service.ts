@@ -61,6 +61,8 @@ export class TradeAnalyticsCalculator {
       winningTrades,
       losingTrades,
       winRate,
+      realizedPnl: totalPnL, // Assuming all PnL is realized for now, pending open position logic
+      unrealizedPnl: 0,
     };
   }
 
@@ -309,6 +311,122 @@ export class TradeAnalyticsCalculator {
   }
 
   /**
+   * Calculate hourly performance for Heat Map
+   */
+  calculateHourlyPerformance() {
+    const hourlyMap = new Map<number, TradeRecord[]>();
+    // Initialize 0-23 hours
+    for (let i = 0; i < 24; i++) hourlyMap.set(i, []);
+
+    this.pnlCalculatedTrades.forEach((trade) => {
+      const hour = trade.timestamp.getHours();
+      hourlyMap.get(hour)?.push(trade);
+    });
+
+    return Array.from(hourlyMap.entries()).map(([hour, trades]) => {
+      const pnl = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+      const wins = trades.filter((t) => t.pnl > 1e-12).length;
+      return {
+        hour,
+        trades: trades.length,
+        pnl,
+        winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
+        volume: trades.reduce((sum, t) => sum + (t.value || 0), 0)
+      };
+    }).sort((a, b) => a.hour - b.hour);
+  }
+
+  /**
+   * Calculate day of week performance for Heat Map
+   */
+  calculateDayOfWeekPerformance() {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayMap = new Map<number, TradeRecord[]>();
+    for (let i = 0; i < 7; i++) dayMap.set(i, []);
+
+    this.pnlCalculatedTrades.forEach((trade) => {
+      const day = trade.timestamp.getDay();
+      dayMap.get(day)?.push(trade);
+    });
+
+    return Array.from(dayMap.entries()).map(([dayIndex, trades]) => {
+      const pnl = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+      const wins = trades.filter((t) => t.pnl > 1e-12).length;
+      return {
+        day: days[dayIndex],
+        dayIndex,
+        trades: trades.length,
+        pnl,
+        winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
+      };
+    }).sort((a, b) => a.dayIndex - b.dayIndex);
+  }
+
+  /**
+   * Calculate order type performance
+   */
+  calculateOrderTypePerformance() {
+    const typeMap = new Map<string, TradeRecord[]>();
+
+    this.pnlCalculatedTrades.forEach((trade) => {
+      const type = trade.orderType || "unknown";
+      if (!typeMap.has(type)) typeMap.set(type, []);
+      typeMap.get(type)?.push(trade);
+    });
+
+    return Array.from(typeMap.entries()).map(([type, trades]) => {
+      const pnl = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+      const wins = trades.filter((t) => t.pnl > 1e-12).length;
+      return {
+        type,
+        count: trades.length,
+        pnl,
+        winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
+        volume: trades.reduce((sum, t) => sum + (t.value || 0), 0)
+      };
+    });
+  }
+
+  /**
+   * Calculate symbol performance (Focus Mode)
+   */
+  calculateSymbolPerformance() {
+    const symbolMap = new Map<string, TradeRecord[]>();
+
+    this.pnlCalculatedTrades.forEach((trade) => {
+      if (!symbolMap.has(trade.symbol)) symbolMap.set(trade.symbol, []);
+      symbolMap.get(trade.symbol)?.push(trade);
+    });
+
+    return Array.from(symbolMap.entries()).map(([symbol, trades]) => {
+      const pnl = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+      const wins = trades.filter((t) => t.pnl > 1e-12).length;
+      return {
+        symbol,
+        trades: trades.length,
+        pnl,
+        winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
+        volume: trades.reduce((sum, t) => sum + (t.value || 0), 0)
+      };
+    }).sort((a, b) => b.volume - a.volume);
+  }
+
+  /**
+   * Calculate daily PnL Map for HeatMap
+   */
+  calculateDailyPnL() {
+    const pnlMap = new Map<string, number>();
+
+    this.pnlCalculatedTrades.forEach((trade) => {
+      const date = trade.timestamp.toISOString().split("T")[0]; // YYYY-MM-DD
+      const current = pnlMap.get(date) || 0;
+      pnlMap.set(date, current + (trade.pnl || 0));
+    });
+
+    return pnlMap;
+  }
+
+  /**
    * Generate complete analytics report
    */
   generateFullReport() {
@@ -320,6 +438,12 @@ export class TradeAnalyticsCalculator {
       sessions: this.calculateSessionPerformance(),
       fees: this.calculateFeeComposition(),
       timeSeries: this.generatePnLTimeSeries(),
+      // New Revolutionary Analytics
+      hourly: this.calculateHourlyPerformance(),
+      daily: this.calculateDayOfWeekPerformance(),
+      orderTypes: this.calculateOrderTypePerformance(),
+      symbols: this.calculateSymbolPerformance(),
+      dailyPnl: this.calculateDailyPnL(),
     };
   }
 }

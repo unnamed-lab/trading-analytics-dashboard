@@ -1,0 +1,13 @@
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - '@stellar/stellar-sdk'
+  - blake-hash
+  - bufferutil
+  - esbuild
+  - prisma
+  - protobufjs
+  - sharp
+  - tiny-secp256k1
+  - unrs-resolver
+  - usb
+  - utf-8-validate

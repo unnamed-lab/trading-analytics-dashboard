@@ -3,51 +3,79 @@
 import { useState } from "react";
 
 import FilterBar from "@/components/dashboard/filter-bar";
-import AIInsights from "@/components/dashboard/ai-insights";
-import KPIRow from "@/components/dashboard/kpi-row";
-import PortfolioSnapshot from "@/components/dashboard/portfolio-snapshot";
-import CumulativePnLChart from "@/components/dashboard/cumulative-pnl-chart";
 import FeesBreakdown from "@/components/dashboard/fees-breakdown";
 import TradeHistory from "@/components/dashboard/trade-history";
-
+import { CommandCenter } from "@/components/dashboard/command-center";
+import { HeatMaps } from "@/components/dashboard/heat-maps";
+import { FusionGraph } from "@/components/dashboard/fusion-graph";
+import { PerformanceMatrix } from "@/components/dashboard/performance-matrix";
+import { FeeWaterfall } from "@/components/dashboard/fee-waterfall";
+import { MomentumGauge } from "@/components/dashboard/momentum-gauge";
+import { AICoach } from "@/components/dashboard/ai-coach";
+import { TradeFilters } from "@/types";
 
 export default function HomePage() {
-  const [activePeriod, setActivePeriod] = useState("7D");
-  const [sides, setSides] = useState({ long: true, short: true });
+  const [filters, setFilters] = useState<TradeFilters>({
+    period: "7D",
+  });
 
-  const filters = {
-    period: activePeriod,
-    sides,
+  const handlePeriodChange = (period: string) => {
+    setFilters((prev) => ({ ...prev, period }));
+  };
+
+  const handleFilterChange = (newFilters: Partial<TradeFilters>) => {
+    setFilters((prev) => ({ ...prev, ...newFilters }));
   };
 
   return (
-    <>
-      <FilterBar
-        activePeriod={activePeriod}
-        setActivePeriod={setActivePeriod}
-        onSideChange={setSides}
-      />
-      <div className="px-4 sm:px-6 pb-8 flex flex-col gap-4 sm:gap-5">
-        <KPIRow />
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-          <div className="lg:col-span-2">
-            <AIInsights />
-          </div>
-          <PortfolioSnapshot />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-          <div className="lg:col-span-2">
-            <CumulativePnLChart />
-          </div>
-          <div className="flex flex-col gap-4 sm:gap-5">
-            <FeesBreakdown />
-          </div>
-        </div>
-
-        <TradeHistory filters={filters} />
+    <div className="min-h-screen bg-background/50 pb-20">
+      {/* 1. The Command Center (Fixed Top) */}
+      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <CommandCenter
+          activePeriod={filters.period || "7D"}
+          onPeriodChange={handlePeriodChange}
+        />
       </div>
-    </>
+
+      <div className="container mx-auto px-4 sm:px-6 space-y-6 mt-6">
+
+        {/* 2. Top Row: Momentum & Heat Maps */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="lg:col-span-1">
+            <MomentumGauge filters={filters} />
+          </div>
+          <div className="lg:col-span-3">
+            <HeatMaps filters={filters} />
+          </div>
+        </div>
+
+        {/* 3. The Fusion & Performance Layer */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Chart */}
+          <div className="lg:col-span-2 space-y-6">
+            <FusionGraph filters={filters} />
+            <TradeHistory filters={filters} onFilterChange={handleFilterChange} />
+          </div>
+
+          {/* Right Column Analysis */}
+          <div className="space-y-6">
+            <PerformanceMatrix filters={filters} />
+            <FeeWaterfall filters={filters} />
+            <FeesBreakdown /> {/* Keeping existing component as detailed view */}
+          </div>
+        </div>
+      </div>
+
+      {/* 4. The AI Coach (Floating) */}
+      <AICoach />
+
+      {/* Hidden Filter Bar state management for compatibility with TradeHistory for now */}
+      <div className="hidden">
+        <FilterBar
+          activePeriod={filters.period || "7D"}
+          setActivePeriod={(p) => handlePeriodChange(p)}
+        />
+      </div>
+    </div>
   );
 }

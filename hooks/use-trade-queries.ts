@@ -11,7 +11,7 @@ import { useMemo, useEffect, useState } from "react";
 import { TransactionDataFetcher } from "@/services/fetch-data.service";
 import { PnLCalculator } from "@/services/pnl-calculator.service";
 import { TradeAnalyticsCalculator } from "@/services/trade-analytics.service";
-import type { TradeRecord, FetchResult } from "@/types";
+import type { TradeRecord, FetchResult, TradeFilters } from "@/types";
 
 // ============================================
 // Query Keys
@@ -109,20 +109,6 @@ export const useTradesInfinite = (limit: number = 50) => {
   });
 };
 
-// ============================================
-// All Trades Query (For smaller datasets)
-// ============================================
-export type TradeFilters = {
-  period?: string;
-  customStart?: Date;
-  customEnd?: Date;
-  symbol?: string;
-  sides?: { long: boolean; short: boolean };
-};
-
-// ============================================
-// All Trades Query (For smaller datasets)
-// ============================================
 // ============================================
 // All Trades Query (For smaller datasets)
 // ============================================
@@ -282,8 +268,11 @@ export const useCalculatedPnL = () => {
 // ============================================
 // Full analytics using TradeAnalyticsCalculator
 // ============================================
-export const useTradeAnalytics = () => {
-  const { data: trades = [] } = useAllTrades();
+// ============================================
+// Full analytics using TradeAnalyticsCalculator
+// ============================================
+export const useTradeAnalytics = (filters?: TradeFilters) => {
+  const { data: trades = [] } = useAllTrades({ filters });
   const { data: financials } = useFinancialDetails();
   const { publicKey } = useTransactionFetcher();
 
@@ -292,11 +281,15 @@ export const useTradeAnalytics = () => {
       ...tradeKeys.summary(publicKey?.toString()),
       trades.length,
       !!financials,
+      JSON.stringify(filters), // Include filters in query key
     ],
     queryFn: async () => {
       if (!publicKey) throw new Error("Wallet not connected");
+      // Note: useAllTrades already filters the trades if filters are passed.
+      // So we just need to calculate analytics on the returned trades.
       const analytics = new TradeAnalyticsCalculator(trades, financials);
-      return analytics.generateFullReport();
+      const report = analytics.generateFullReport();
+      return report;
     },
     enabled: !!publicKey && (trades.length > 0 || !!financials),
     staleTime: Infinity,

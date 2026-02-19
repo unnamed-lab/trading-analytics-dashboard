@@ -2,13 +2,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, use } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
 import { useJournals } from "@/hooks/use-journals";
 
 export default function JournalDetail({ params }: { params: { id: string } }) {
-  const { id } = params;
+  const { id } = use(params);
   const { publicKey, signMessage } = useWallet();
   const publicKeyStr = publicKey?.toBase58() ?? null;
   const router = useRouter();

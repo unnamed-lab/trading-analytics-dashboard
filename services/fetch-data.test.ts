@@ -42,6 +42,7 @@ jest.mock('@/lib/analyzers/performance-analyzer', () => {
 // Mock @deriverse/kit
 jest.mock('@deriverse/kit', () => {
   return {
+    __esModule: true,
     Engine: jest.fn().mockImplementation(() => {
       return {
         initialize: jest.fn().mockResolvedValue(undefined),
@@ -81,6 +82,7 @@ jest.mock('@deriverse/kit', () => {
 
 // Mock @solana/kit
 jest.mock('@solana/kit', () => ({
+  __esModule: true,
   devnet: jest.fn().mockImplementation((url) => url),
   address: jest.fn().mockImplementation((addr) => addr),
   createSolanaRpc: jest.fn().mockReturnValue({

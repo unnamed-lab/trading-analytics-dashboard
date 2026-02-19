@@ -17,6 +17,8 @@ import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
 import { useJournals } from "@/hooks/use-journals";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 interface TradeReviewPanelProps {
   trade: TradeRecord;
@@ -27,7 +29,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
   const isProfitable = trade.pnl >= 0;
   const bullish = isBullishSide(trade.side);
 
-   // Only show if it's a perp trade
+  // Only show if it's a perp trade
   if (trade.discriminator !== 19 && trade.tradeType !== "perp") {
     return null;
   }
@@ -77,9 +79,25 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
     existing?.content ?? trade.notes ?? "",
   );
 
+  const [tags, setTags] = useState<string[]>(
+    existing?.tags ?? trade.tags ?? []
+  );
+
   useEffect(() => {
     setJournalContent(existing?.content ?? trade.notes ?? "");
+    setTags(existing?.tags ?? trade.tags ?? []);
   }, [existing?.id, trade.id]);
+
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim();
+    if (trimmed && !tags.includes(trimmed)) {
+      setTags([...tags, trimmed]);
+    }
+  };
+
+  const removeTag = (tagToRemove: string) => {
+    setTags(tags.filter(t => t !== tagToRemove));
+  };
 
   // cached review info (client-only)
   let cachedMinutes: number | null = null;
@@ -114,9 +132,8 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
               {trade.symbol}
             </span>
             <span
-              className={`rounded border px-2 py-0.5 text-xs font-bold ${
-                bullish ? "border-profit text-profit" : "border-loss text-loss"
-              }`}
+              className={`rounded border px-2 py-0.5 text-xs font-bold ${bullish ? "border-profit text-profit" : "border-loss text-loss"
+                }`}
             >
               {formatSide(trade.side)}
             </span>
@@ -136,11 +153,10 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
 
         {/* Profit Banner */}
         <div
-          className={`mx-5 mt-5 rounded-lg p-4 flex items-center justify-between ${
-            isProfitable
+          className={`mx-5 mt-5 rounded-lg p-4 flex items-center justify-between ${isProfitable
               ? "bg-profit/10 border border-profit/30"
               : "bg-loss/10 border border-loss/30"
-          }`}
+            }`}
         >
           <div className="flex items-center gap-2">
             <CheckCircle
@@ -229,13 +245,12 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                   {m.label}
                 </span>
                 <p
-                  className={`font-mono text-lg font-bold mt-1 ${
-                    m.negative
+                  className={`font-mono text-lg font-bold mt-1 ${m.negative
                       ? "text-loss"
                       : m.primary
                         ? "text-primary"
                         : "text-foreground"
-                  }`}
+                    }`}
                 >
                   {m.value}
                 </p>
@@ -348,6 +363,28 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
           />
         </div>
 
+        {/* Tags */}
+        <div className="px-5 pb-5">
+          <label className="text-xs text-muted-foreground">Tags</label>
+          <div className="flex flex-wrap gap-2 mt-2 mb-2">
+            {tags.map(tag => (
+              <Badge key={tag} variant="secondary" className="cursor-pointer hover:bg-destructive/20 pr-1" onClick={() => removeTag(tag)}>
+                {tag} <X className="h-3 w-3 ml-1 hover:text-destructive" />
+              </Badge>
+            ))}
+          </div>
+          <Input
+            className="h-8 text-xs"
+            placeholder="Add tag (Press Enter)"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                addTag(e.currentTarget.value);
+                e.currentTarget.value = '';
+              }
+            }}
+          />
+        </div>
+
         <div className="mt-auto border-t border-border p-5 flex gap-3">
           <button
             onClick={async () => {
@@ -374,12 +411,14 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                   await update.mutateAsync({
                     id: existing.id,
                     content: journalContent,
+                    tags,
                   });
                 } else {
                   await create.mutateAsync({
                     tradeId: trade.id,
                     content: journalContent,
                     title: `${trade.symbol} ${trade.id}`,
+                    tags,
                   });
                 }
               } catch (e) {

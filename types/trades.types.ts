@@ -15,18 +15,18 @@ export interface TradeRecord extends Partial<TradeComprehensiveRecord> {
   amount?: number;
   value?: number;
   orderType?:
-    | "limit"
-    | "market"
-    | "cancel"
-    | "revoke"
-    | "fee"
-    | "funding"
-    | "event"
-    | "new"
-    | "deposit"
-    | "socLoss"
-    | "withdraw"
-    | "unknown";
+  | "limit"
+  | "market"
+  | "cancel"
+  | "revoke"
+  | "fee"
+  | "funding"
+  | "event"
+  | "new"
+  | "deposit"
+  | "socLoss"
+  | "withdraw"
+  | "unknown";
   instrument?: string;
   clientId: string;
   orderId: string;
@@ -43,14 +43,14 @@ export interface TradeRecord extends Partial<TradeComprehensiveRecord> {
   pnlPercentage: number;
   duration: number;
   status:
-    | "win"
-    | "loss"
-    | "breakeven"
-    | "open"
-    | "close"
-    | "pending"
-    | "info"
-    | "unknown";
+  | "win"
+  | "loss"
+  | "breakeven"
+  | "open"
+  | "close"
+  | "pending"
+  | "info"
+  | "unknown";
   notes?: string;
   tradeType?: "spot" | "perp" | "swap" | "unknown";
   fundingPayments?: number;
@@ -100,72 +100,108 @@ export interface TradeComprehensiveRecord {
 }
 
 export interface TradeAnalytics {
-  // Core PnL
-  totalPnl: number;
-  unrealizedPnl: number;
-  realizedPnl: number;
+  core: {
+    totalPnL: number;
+    totalVolume: number;
+    totalFees: number;
+    totalFunding: number;
+    netPnL: number;
+    netDeposits: number;
+    totalTrades: number;
+    winningTrades: number;
+    losingTrades: number;
+    winRate: number;
+    realizedPnl: number;
+    unrealizedPnl: number;
+  };
 
-  // Win Rate
-  totalTrades: number;
-  winningTrades: number;
-  losingTrades: number;
-  winRate: number; // percentage
+  longShort: {
+    longTrades: number;
+    shortTrades: number;
+    longVolume: number;
+    shortVolume: number;
+    ratio: number;
+    bias: "BULLISH" | "BEARISH" | "NEUTRAL";
+  };
 
-  // Volume & Fees
-  totalVolume: number;
-  totalFees: number;
-  feeBreakdown: {
+  risk: {
+    largestGain: number;
+    largestLoss: number;
+    avgWin: number;
+    avgLoss: number;
+    profitFactor: number;
+  };
+
+  drawdown: {
+    maxDrawdown: number;
+    currentDrawdown: number;
+    drawdownSeries: Array<{
+      timestamp: number;
+      drawdown: number;
+      peak: number;
+    }>;
+  };
+
+  sessions: {
+    totalSessions: number;
+    profitableSessions: number;
+    losingSessions: number;
+    avgPnLPerSession: number;
+    bestSession: any;
+    worstSession: any;
+    sessionData: any[];
+  };
+
+  fees: {
     spotFees: number;
     perpFees: number;
-    fundingPayments: number;
-    socializedLosses: number;
+    totalFees: number;
+    feesBySymbol: Array<{ symbol: string; fees: number; percentage: number }>;
+    breakdown: any;
   };
 
-  // Time Analysis
-  avgTradeDuration: number; // in seconds
-  tradesByTimeOfDay: Map<number, TradeRecord[]>; // hour -> trades
-  tradesByDayOfWeek: Map<number, TradeRecord[]>; // day -> trades
+  timeSeries: Array<{
+    timestamp: number;
+    date: string;
+    cumulativePnL: number;
+    tradePnL: number;
+  }>;
 
-  // Directional Bias
-  longTrades: number;
-  shortTrades: number;
-  longVolume: number;
-  shortVolume: number;
-  longShortRatio: number;
+  // Revolutionary Analytics
+  hourly: Array<{
+    hour: number;
+    trades: number;
+    pnl: number;
+    winRate: number;
+    volume: number;
+  }>;
 
-  // Risk Metrics
-  largestGain: number;
-  largestLoss: number;
-  avgWinAmount: number;
-  avgLossAmount: number;
-  profitFactor: number; // gross profit / gross loss
+  daily: Array<{
+    day: string;
+    dayIndex: number;
+    trades: number;
+    pnl: number;
+    winRate: number;
+  }>;
 
-  // Drawdown
-  maxDrawdown: number;
-  currentDrawdown: number;
-  peakEquity: number;
+  // Note: dailyPnl map for calendar heatmap
+  dailyPnl: Map<string, number>;
 
-  // Symbol Performance
-  symbolPerformance: Map<
-    string,
-    {
-      pnl: number;
-      trades: number;
-      volume: number;
-      winRate: number;
-    }
-  >;
+  orderTypes: Array<{
+    type: string;
+    count: number;
+    pnl: number;
+    winRate: number;
+    volume: number;
+  }>;
 
-  // Order Type Performance
-  orderTypePerformance: {
-    market: TradeStats;
-    limit: TradeStats;
-    stop: TradeStats;
-  };
-
-  // Historical
-  dailyPnl: Map<string, number>; // date -> pnl
-  cumulativePnl: number[];
+  symbols: Array<{
+    symbol: string;
+    trades: number;
+    pnl: number;
+    winRate: number;
+    volume: number;
+  }>;
 }
 
 export interface TradeStats {
@@ -302,6 +338,12 @@ export interface TradeFilters {
   orderType?: string;
   clientId?: string;
   instrId?: number;
+
+  // UI Filters
+  period?: string;
+  customStart?: Date;
+  customEnd?: Date;
+  sides?: { long: boolean; short: boolean };
 }
 
 // ============================================
@@ -408,20 +450,20 @@ export interface FinancialDetails {
   totalProtocolFees: number;      // Fees paid to protocol (USDC)
   totalNetworkFees: number;        // SOL network fees (converted to USDC)
   totalFees: number;               // Total fees (protocol + network)
-  
+
   // Funding payments
   totalFundingReceived: number;    // Positive funding received
   totalFundingPaid: number;        // Negative funding paid
   netFunding: number;              // Net funding PnL
-  
+
   // Deposits/Withdrawals
   totalDeposits: number;
   totalWithdrawals: number;
   netDeposits: number;             // Net capital inflow
-  
+
   // Losses
   socializedLosses: number;        // Total socialized losses
-  
+
   // Detailed breakdowns
   feeBreakdown: {
     spotFees: number;
@@ -429,10 +471,10 @@ export interface FinancialDetails {
     makerRebates: number;
     takerFees: number;
   };
-  
+
   fundingBreakdown: Map<string, number>;        // Symbol -> net funding
   fundingBreakdownArray?: Array<{ symbol: string; amount: number }>;
-  
+
   dailySummary: Map<string, {                    // Date -> daily totals
     date: string;
     fees: number;

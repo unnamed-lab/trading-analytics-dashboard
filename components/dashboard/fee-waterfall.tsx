@@ -1,0 +1,83 @@
+"use client";
+
+import React from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ReferenceLine } from "recharts";
+import { TradeFilters } from "@/types";
+
+export function FeeWaterfall({ filters }: { filters?: TradeFilters }) {
+    const { data: analytics } = useTradeAnalytics(filters);
+
+    if (!analytics) return null;
+
+    const { totalPnL, totalFees, netPnL, totalFunding } = analytics.core;
+
+    // Construct waterfall data
+    // Start: Gross PnL (Total PnL + Fees - Funding if funding is included in PnL, but let's assume PnL is net of funding but gross of fees for this viz)
+    // Actually, let's look at `analytics.core`:
+    // totalPnL is usually what the fetcher returns. 
+    // Let's assume:
+    // Gross PnL = Net PnL + Fees - Funding (if funding is positive) or + Funding (if negative)... logic is tricky without precise definitions.
+    // valuable metric: "Trading PnL" (Price Action) vs "Friction" (Fees) vs "Funding"
+
+    // Let's define the steps:
+    // 1. Gross Profit (from price action)
+    // 2. Fees (always negative flow)
+    // 3. Funding (can be +/-)
+    // 4. Net PnL
+
+    // We can approximate Gross PnL as Net PnL + Fees - Funding
+    const grossPnL = netPnL + totalFees - totalFunding;
+
+    const data = [
+        { name: "Gross PnL", value: grossPnL, fill: "#3b82f6" }, // Blue
+        { name: "Fees", value: -totalFees, fill: "#f43f5e" },    // Red
+        { name: "Funding", value: totalFunding, fill: totalFunding >= 0 ? "#10b981" : "#f43f5e" },
+        { name: "Net PnL", value: netPnL, fill: netPnL >= 0 ? "#10b981" : "#f43f5e", isTotal: true },
+    ];
+
+    // Waterfall logic is usually custom in Recharts, but we can standard Bar chart it
+    // Or just show these 4 meaningful bars side-by-side which is clearer than a complex waterfall sometimes.
+    // The user asked for a Waterfall specifically. 
+    // A true waterfall needs "start" and "end" values for floating bars.
+    // Simpler approach: Breakdown Chart.
+
+    return (
+        <Card className="col-span-1">
+            <CardHeader>
+                <CardTitle>Fee Impact</CardTitle>
+                <CardDescription>Breakdown of friction costs</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data}>
+                        <XAxis dataKey="name" fontSize={12} />
+                        <YAxis tickFormatter={(val) => `$${val}`} fontSize={12} />
+                        <Tooltip
+                            cursor={{ fill: 'transparent' }}
+                            content={({ active, payload }) => {
+                                if (active && payload && payload.length) {
+                                    const d = payload[0].payload;
+                                    return (
+                                        <div className="bg-background border rounded-lg p-2 shadow-lg text-xs">
+                                            <p className="font-bold mb-1">{d.name}</p>
+                                            <p className="font-mono">${d.value.toFixed(2)}</p>
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            }}
+                        />
+                        <ReferenceLine y={0} stroke="#666" />
+                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                            {data.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.fill} />
+                            ))}
+                        </Bar>
+                    </BarChart>
+                </ResponsiveContainer>
+            </CardContent>
+        </Card>
+    );
+}

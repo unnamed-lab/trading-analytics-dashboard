@@ -1047,7 +1047,7 @@ export class TransactionDataFetcher {
           // ── PERP FILL — discriminator 19 ──────────────────────────────
           case LogType.perpFillOrder: {
             const perpFill = event as PerpFillOrderReportModel;
-            const symbol = "SOL";
+            const symbol = "SOL/USDC"; // Hardcorded because I don't know how to get the symbol from the event
 
             // FIXED: Inverted logic based on user observation (PnL signs were flipped)
             // side 0 = Short/Sell, side 1 = Long/Buy

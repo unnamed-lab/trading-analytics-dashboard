@@ -10,14 +10,16 @@
  *
  * If no PROGRAM_ID is given, reads from PROGRAM_ID env var.
  */
+/* eslint-disable no-console */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import "dotenv/config";
 import { createSolanaRpc, devnet, getBase64Encoder } from "@solana/kit";
 import bs58 from "bs58";
 
 // AccountType enum from @deriverse/kit
 const TAG_ROOT = 2;
-const TAG_COMMUNITY = 34;
-const TAG_TOKEN = 4;
+const TAG_COMMUNITY = 34; // eslint-disable-line @typescript-eslint/no-unused-vars
+const TAG_TOKEN = 4; // eslint-disable-line @typescript-eslint/no-unused-vars
 
 async function discoverVersion(programId: string, rpcUrl: string) {
     console.log(`\nProgram ID : ${programId}`);
@@ -29,18 +31,18 @@ async function discoverVersion(programId: string, rpcUrl: string) {
     const tagBuf = Buffer.alloc(4);
     tagBuf.writeUInt32LE(TAG_ROOT, 0);
 
-    const accounts = await rpc
+    const accounts: any = await rpc
         .getProgramAccounts(programId as any, {
             encoding: "base64",
             dataSlice: { offset: 0, length: 8 }, // only read tag + version
             filters: [
                 {
                     memcmp: {
-                        offset: 0n,
+                        offset: 0,
                         encoding: "base58",
                         bytes: bs58.encode(tagBuf),
                     },
-                },
+                } as any,
             ],
         })
         .send();

@@ -9,6 +9,8 @@
  * ║  Usage:  npx tsx scripts/debug-deriverse-kit.ts                        ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
  */
+/* eslint-disable no-console */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import "dotenv/config";
 import { address, createSolanaRpc, devnet, type Signature } from "@solana/kit";
 import {
@@ -65,8 +67,8 @@ async function test(name: string, fn: () => Promise<void>) {
         await fn();
         passed.push(name);
         console.log(`  ✅ ${name}`);
-    } catch (err: any) {
-        const msg = err?.message || String(err);
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         failed.push({ name, error: msg });
         console.log(`  ❌ ${name}`);
         console.log(`     → ${msg}`);
@@ -184,7 +186,7 @@ function delay(ms: number) {
     // ═══════════════════════════════════════════════════════════════════════════
     header("3. Engine Constructor");
 
-    let engine: Engine | null = null;
+    let engine: any = null;
 
     await test("Engine constructor (with custom args)", async () => {
         engine = new Engine(rpc as any, {
@@ -237,6 +239,7 @@ function delay(ms: number) {
         console.log(`     community.data.size    = ${community.data?.size}`);
     });
 
+    // ── Tokens & Instruments (after initialize) ────────────────────────────────
     section("4b. Tokens & Instruments (after initialize)");
 
     await test("tokens map is available", async () => {
@@ -544,8 +547,9 @@ function delay(ms: number) {
                 }
                 await delay(200);
             }
-        } catch (err: any) {
-            console.log(`     ⚠️ Could not fetch transaction logs: ${err.message}`);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.log(`     ⚠️ Could not fetch transaction logs: ${msg}`);
         }
 
         if (realLogs) {

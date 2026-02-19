@@ -9,6 +9,7 @@ interface TerminalLine {
     text: string;
     status: "pending" | "success" | "warning" | "error";
     delay: number;
+    timestamp?: string; // Add timestamp to store when line was added
 }
 
 const BOOT_SEQUENCE: TerminalLine[] = [
@@ -22,9 +23,10 @@ const BOOT_SEQUENCE: TerminalLine[] = [
 ];
 
 export function LoadingTerminal({ onComplete }: { onComplete?: () => void }) {
-    const [lines, setLines] = useState<TerminalLine[]>([]);
+    const [lines, setLines] = useState<(TerminalLine & { timestamp: string })[]>([]);
     const [progress, setProgress] = useState(0);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         let timeouts: NodeJS.Timeout[] = [];
@@ -39,7 +41,17 @@ export function LoadingTerminal({ onComplete }: { onComplete?: () => void }) {
                 setLines((prev) => {
                     // Mark previous pending as success (simulation)
                     const updated = prev.map(p => p.status === 'pending' ? { ...p, status: 'success' as const } : p);
-                    return [...updated, line];
+                    
+                    // Add line with fixed timestamp
+                    const now = new Date();
+                    const timestamp = now.toLocaleTimeString('en-US', { 
+                        hour12: false,
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                    
+                    return [...updated, { ...line, timestamp }];
                 });
 
                 // Update progress based on index
@@ -60,16 +72,22 @@ export function LoadingTerminal({ onComplete }: { onComplete?: () => void }) {
         return () => timeouts.forEach(clearTimeout);
     }, [onComplete]);
 
-    // Auto-scroll
+    // Auto-scroll with smooth behavior
     useEffect(() => {
         if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            scrollRef.current.scrollTo({
+                top: scrollRef.current.scrollHeight,
+                behavior: 'smooth'
+            });
         }
     }, [lines]);
 
     return (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/95 text-primary font-mono p-4">
-            <div className="w-full max-w-2xl bg-card/50 border border-primary/30 rounded-lg p-6 shadow-[0_0_50px_-12px_rgba(var(--primary),0.3)] relative overflow-hidden">
+            <div 
+                ref={containerRef}
+                className="w-full max-w-2xl bg-card/50 border border-primary/30 rounded-lg p-6 shadow-[0_0_50px_-12px_rgba(var(--primary),0.3)] relative overflow-hidden"
+            >
                 {/* Scanline effect */}
                 <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-[1] bg-[length:100%_2px,3px_100%] pointer-events-none" />
 
@@ -82,27 +100,31 @@ export function LoadingTerminal({ onComplete }: { onComplete?: () => void }) {
 
                 <div
                     ref={scrollRef}
-                    className="h-64 overflow-y-auto space-y-2 mb-6 font-mono text-sm relative z-10 scrollbar-hide"
+                    className="max-h-[256px] min-h-[200px] overflow-y-auto space-y-2 mb-6 font-mono text-sm relative z-10 scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent"
                 >
                     {lines.map((line) => (
-                        <div key={line.id} className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
-                            <span className="text-muted-foreground/50">[{new Date().toLocaleTimeString()}]</span>
+                        <div key={line.id} className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+                            <span className="text-muted-foreground/50 whitespace-nowrap text-xs">
+                                [{line.timestamp}]
+                            </span>
                             <span className={cn(
-                                "flex-1",
+                                "flex-1 break-words",
                                 line.status === 'success' && "text-primary/90",
                                 line.status === 'pending' && "text-primary/70 animate-pulse",
                             )}>
                                 {line.text}
                             </span>
                             <span className={cn(
-                                "w-3 h-3 rounded-full",
+                                "w-3 h-3 rounded-full flex-shrink-0 mt-1 mr-2",
                                 line.status === 'success' && "bg-primary shadow-[0_0_10px_rgba(var(--primary),0.8)]",
                                 line.status === 'pending' && "bg-yellow-500 animate-ping",
                                 line.status === 'error' && "bg-destructive",
                             )} />
                         </div>
                     ))}
-                    <div className="h-4 w-3 bg-primary animate-pulse inline-block mr-3" />
+                    {lines.length < BOOT_SEQUENCE.length && (
+                        <div className="h-4 w-3 bg-primary animate-pulse inline-block" />
+                    )}
                 </div>
 
                 <div className="relative z-10">

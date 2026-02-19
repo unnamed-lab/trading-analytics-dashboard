@@ -1,329 +1,376 @@
 "use client";
 
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useAllTrades } from "@/hooks/use-trade-queries";
 import { cn } from "@/lib/utils";
 import { TradeFilters } from "@/types";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
+// ─── Gauge geometry constants ─────────────────────────────────────────────────
+const SVG_W = 280;
+const SVG_H = 160; // half-height: arc from left to right along bottom
+const CX = SVG_W / 2;
+const CY = SVG_H;       // arc pivot is at bottom-centre of the viewBox
+const R_OUTER = 130;
+const R_INNER = 90;
+const R_NEEDLE = 108;   // needle length
+const R_TICKS  = R_OUTER + 8;
+
+// Zone definitions: [startScore, endScore, color]
+const ZONES: [number, number, string][] = [
+    [  0,  20, "#3b82f6"], // cold – blue
+    [ 20,  40, "#6366f1"], // cool – indigo
+    [ 40,  60, "#10b981"], // neutral – emerald
+    [ 60,  80, "#f59e0b"], // warm – amber
+    [ 80, 100, "#ef4444"], // hot – red
+];
+
+const TICK_VALUES = [0, 25, 50, 75, 100];
+
+// ─── Score → angle (degrees, 0 = pointing left, 180 = pointing right) ────────
+const scoreToAngle = (score: number) => (score / 100) * 180;
+
+// ─── Polar → cartesian (origin at CX, CY) ────────────────────────────────────
+const polar = (angleDeg: number, r: number) => {
+    const rad = ((angleDeg - 180) * Math.PI) / 180; // -180 offset: 0° = left
+    return {
+        x: CX + r * Math.cos(rad),
+        y: CY + r * Math.sin(rad),
+    };
+};
+
+// ─── SVG arc path between two score values ───────────────────────────────────
+const arcPath = (s0: number, s1: number, rInner: number, rOuter: number) => {
+    const a0 = scoreToAngle(s0);
+    const a1 = scoreToAngle(s1);
+    const p0o = polar(a0, rOuter);
+    const p1o = polar(a1, rOuter);
+    const p0i = polar(a0, rInner);
+    const p1i = polar(a1, rInner);
+    const large = a1 - a0 > 180 ? 1 : 0;
+    return [
+        `M ${p0o.x} ${p0o.y}`,
+        `A ${rOuter} ${rOuter} 0 ${large} 1 ${p1o.x} ${p1o.y}`,
+        `L ${p1i.x} ${p1i.y}`,
+        `A ${rInner} ${rInner} 0 ${large} 0 ${p0i.x} ${p0i.y}`,
+        "Z",
+    ].join(" ");
+};
+
+// ─── Status config (static Tailwind classes only — no dynamic construction) ──
+const STATUS_CONFIG: Record<
+    string,
+    { label: string; textClass: string; bgClass: string; borderClass: string }
+> = {
+    explosive:    { label: "🚀 Explosive",    textClass: "text-rose-400",   bgClass: "bg-rose-500/10",   borderClass: "border-rose-500/30"   },
+    onfire:       { label: "🔥 On Fire",      textClass: "text-orange-400", bgClass: "bg-orange-500/10", borderClass: "border-orange-500/30" },
+    heatingup:    { label: "📈 Heating Up",   textClass: "text-amber-400",  bgClass: "bg-amber-500/10",  borderClass: "border-amber-500/30"  },
+    stable:       { label: "⚖️ Stable",       textClass: "text-emerald-400",bgClass: "bg-emerald-500/10",borderClass: "border-emerald-500/30"},
+    sideways:     { label: "🌊 Sideways",     textClass: "text-indigo-400", bgClass: "bg-indigo-500/10", borderClass: "border-indigo-500/30" },
+    coolingdown:  { label: "📉 Cooling Down", textClass: "text-cyan-400",   bgClass: "bg-cyan-500/10",   borderClass: "border-cyan-500/30"   },
+    icecold:      { label: "🧊 Ice Cold",     textClass: "text-blue-400",   bgClass: "bg-blue-500/10",   borderClass: "border-blue-500/30"   },
+    nodata:       { label: "— No Data",       textClass: "text-muted-foreground", bgClass: "bg-muted/20", borderClass: "border-border/40" },
+};
+
+// ─── Ease function for needle animation ──────────────────────────────────────
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
     const { data: trades } = useAllTrades({ filters });
-    const [animatedScore, setAnimatedScore] = useState(50);
-    const gaugeRef = useRef<HTMLDivElement>(null);
-    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+    const [displayAngle, setDisplayAngle] = useState(0); // start at leftmost (score=0)
+    const animRef = useRef<number | null>(null);
+    const prevAngleRef = useRef(0);
 
-    // Measure gauge container for responsive sizing
-    useEffect(() => {
-        if (!gaugeRef.current) return;
-
-        const updateDimensions = () => {
-            if (gaugeRef.current) {
-                const { width, height } = gaugeRef.current.getBoundingClientRect();
-                setDimensions({ width, height });
-            }
-        };
-
-        updateDimensions();
-        const observer = new ResizeObserver(updateDimensions);
-        observer.observe(gaugeRef.current);
-
-        return () => observer.disconnect();
-    }, []);
-
-    const { score, status, statusColor, recentWinRate, avgProfitLoss, consistency } = useMemo(() => {
+    // ── Analytics ──────────────────────────────────────────────────────────────
+    const analytics = useMemo(() => {
         if (!trades || trades.length === 0) {
-            return { 
-                score: 50, 
-                status: "No Data", 
-                statusColor: "text-muted-foreground", 
-                recentWinRate: 0,
-                avgProfitLoss: 0,
-                consistency: 0
-            };
+            return { score: 50, statusKey: "nodata", recentWinRate: 0, avgPnL: 0, consistency: 0 };
         }
 
-        // Analyze last 50 trades
-        const recentTrades = trades.slice(0, 50);
-        const totalRecent = recentTrades.length;
+        const recent = trades.slice(0, 50);
+        const n = recent.length;
+        let wins = 0, gains = 0, losses = 0, totalPnL = 0;
 
-        if (totalRecent === 0) {
-            return { 
-                score: 50, 
-                status: "No Data", 
-                statusColor: "text-muted-foreground", 
-                recentWinRate: 0,
-                avgProfitLoss: 0,
-                consistency: 0
-            };
-        }
-
-        let wins = 0;
-        let totalGains = 0;
-        let totalLosses = 0;
-        let totalPnL = 0;
-        let sumOfSquares = 0;
-
-        recentTrades.forEach((t) => {
-            const val = t.pnl || 0;
-            totalPnL += val;
-            
-            if (val > 0) {
-                wins++;
-                totalGains += val;
-            } else {
-                totalLosses += Math.abs(val);
-            }
+        recent.forEach(({ pnl = 0 }) => {
+            totalPnL += pnl;
+            if (pnl > 0) { wins++; gains += pnl; }
+            else losses += Math.abs(pnl);
         });
 
-        // Calculate win rate consistency
-        const avgPnL = totalPnL / totalRecent;
-        recentTrades.forEach((t) => {
-            sumOfSquares += Math.pow((t.pnl || 0) - avgPnL, 2);
-        });
-        const stdDev = Math.sqrt(sumOfSquares / totalRecent);
-        const maxStdDev = Math.max(Math.abs(avgPnL) * 3, 100);
-        const consistencyScore = Math.max(0, Math.min(100, 100 - (stdDev / maxStdDev) * 100));
+        const winRate = (wins / n) * 100;
+        const rsiRaw = gains + losses === 0 ? 50 : (gains / (gains + losses)) * 100;
+        const score  = Math.round(rsiRaw * 0.7 + winRate * 0.3);
 
-        // RSI-like Momentum Calculation
-        const totalMovement = totalGains + totalLosses;
-        let rsiScore = totalMovement === 0 ? 50 : (totalGains / totalMovement) * 100;
+        // Consistency: inverse coefficient of variation
+        const avgPnL = totalPnL / n;
+        const variance = recent.reduce((s, { pnl = 0 }) => s + (pnl - avgPnL) ** 2, 0) / n;
+        const cv = avgPnL === 0 ? 1 : Math.sqrt(variance) / (Math.abs(avgPnL) || 1);
+        const consistency = Math.round(Math.max(0, Math.min(100, 100 - cv * 20)));
 
-        // Weight the score with win rate
-        const winRate = (wins / totalRecent) * 100;
-        const weightedScore = (rsiScore * 0.7 + winRate * 0.3);
-        rsiScore = Math.round(weightedScore);
+        let statusKey = "stable";
+        if      (score >= 80) statusKey = "explosive";
+        else if (score >= 70) statusKey = "onfire";
+        else if (score >= 60) statusKey = "heatingup";
+        else if (score <= 20) statusKey = "icecold";
+        else if (score <= 30) statusKey = "coolingdown";
+        else if (score <= 40) statusKey = "sideways";
 
-        // Determine Status
-        let statusStr = "Neutral";
-        let color = "text-yellow-500";
-
-        if (rsiScore >= 80) {
-            statusStr = "🚀 Explosive";
-            color = "text-rose-500";
-        } else if (rsiScore >= 70) {
-            statusStr = "🔥 On Fire";
-            color = "text-orange-500";
-        } else if (rsiScore >= 60) {
-            statusStr = "📈 Heating Up";
-            color = "text-amber-500";
-        } else if (rsiScore <= 20) {
-            statusStr = "🧊 Ice Cold";
-            color = "text-blue-500";
-        } else if (rsiScore <= 30) {
-            statusStr = "📉 Cooling Down";
-            color = "text-cyan-500";
-        } else if (rsiScore <= 40) {
-            statusStr = "🌊 Sideways";
-            color = "text-indigo-500";
-        } else {
-            statusStr = "⚖️ Stable";
-            color = "text-emerald-500";
-        }
-
-        return {
-            score: rsiScore,
-            status: statusStr,
-            statusColor: color,
-            recentWinRate: winRate,
-            avgProfitLoss: totalPnL / totalRecent,
-            consistency: Math.round(consistencyScore)
-        };
+        return { score, statusKey, recentWinRate: winRate, avgPnL, consistency };
     }, [trades]);
 
-    // Animate the score when it changes
+    // ── Animate needle to target angle ────────────────────────────────────────
+    const animateTo = useCallback((targetAngle: number) => {
+        if (animRef.current) cancelAnimationFrame(animRef.current);
+        const startAngle = prevAngleRef.current;
+        const delta = targetAngle - startAngle;
+        const duration = 900; // ms
+        let startTime: number | null = null;
+
+        const step = (ts: number) => {
+            if (!startTime) startTime = ts;
+            const t = Math.min((ts - startTime) / duration, 1);
+            const eased = easeOutCubic(t);
+            const current = startAngle + delta * eased;
+            setDisplayAngle(current);
+            if (t < 1) animRef.current = requestAnimationFrame(step);
+            else prevAngleRef.current = targetAngle;
+        };
+
+        animRef.current = requestAnimationFrame(step);
+    }, []);
+
     useEffect(() => {
-        setAnimatedScore(score);
-    }, [score]);
+        animateTo(scoreToAngle(analytics.score));
+        return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+    }, [analytics.score, animateTo]);
 
-    // Gauge Data
-    const gaugeData = [
-        { name: "Cold Zone", value: 30, color: "#3b82f6", opacity: 0.7 },
-        { name: "Cool Zone", value: 20, color: "#6366f1", opacity: 0.8 },
-        { name: "Neutral Zone", value: 20, color: "#10b981", opacity: 0.9 },
-        { name: "Warm Zone", value: 20, color: "#f59e0b", opacity: 0.9 },
-        { name: "Hot Zone", value: 10, color: "#ef4444", opacity: 0.8 },
-    ];
+    // ── Needle tip & base ─────────────────────────────────────────────────────
+    const needleTip  = polar(displayAngle, R_NEEDLE);
+    const needleLeft = polar(displayAngle + 90, 5);
+    const needleRight= polar(displayAngle - 90, 5);
 
-    // Calculate responsive sizes
-    const needleRotation = (animatedScore / 100) * 180 - 90;
-    const isMobile = dimensions.width < 400;
-    const needleHeight = isMobile ? 70 : 100;
-    const innerRadius = isMobile ? 50 : 70;
-    const outerRadius = isMobile ? 90 : 120;
+    const status = STATUS_CONFIG[analytics.statusKey] ?? STATUS_CONFIG.nodata;
 
-    // Format currency
-    const formatCurrency = (value: number) => {
-        const absValue = Math.abs(value);
-        const formatted = new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD',
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0,
-        }).format(absValue);
-        
-        return value >= 0 ? `+${formatted}` : `-${formatted}`;
+    const fmtCurrency = (v: number) => {
+        const abs = Math.abs(v);
+        const s = new Intl.NumberFormat("en-US", {
+            style: "currency", currency: "USD", maximumFractionDigits: 0,
+        }).format(abs);
+        return v >= 0 ? `+${s}` : `−${s}`;
     };
 
+    // ── Render ────────────────────────────────────────────────────────────────
     return (
-        <Card className="col-span-1 border-border/50 bg-gradient-to-br from-card/50 to-card/30 backdrop-blur-sm overflow-hidden">
-            <CardHeader className="pb-0.5 px-4 sm:px-6">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+        <Card className="h-full col-span-1 border-border/50 bg-card/50 backdrop-blur-sm overflow-hidden flex flex-col">
+            <CardHeader className="pb-1 px-5 pt-5">
+                <div className="flex items-start justify-between gap-3">
                     <div>
-                        <CardTitle className="text-base sm:text-lg font-semibold">Momentum Gauge</CardTitle>
-                        <CardDescription className="text-xs sm:text-sm">Last 50 trades analysis</CardDescription>
+                        <CardTitle className="text-sm font-semibold tracking-wide uppercase text-muted-foreground/70">
+                            Momentum Gauge
+                        </CardTitle>
+                        <CardDescription className="text-base font-medium text-foreground mt-0.5">
+                            Last 50 trades
+                        </CardDescription>
                     </div>
+
+                    {/* Status badge — static Tailwind classes */}
                     <div className={cn(
-                        "px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium border whitespace-nowrap",
-                        "bg-opacity-20 backdrop-blur-sm",
-                        statusColor.replace('text-', 'bg-').replace('500', '500/20'),
-                        statusColor,
-                        "border-current/20"
+                        "px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap mt-0.5",
+                        status.bgClass, status.textClass, status.borderClass
                     )}>
-                        {status}
+                        {status.label}
                     </div>
                 </div>
             </CardHeader>
-            
-            <CardContent className="flex flex-col items-center justify-center pb-6 px-3 sm:px-6" ref={gaugeRef}>
-                {/* Gauge Chart Container */}
-                <div className="relative w-full h-[140px] sm:h-[160px] mt-0.5 sm:mt-2">
-                    {/* Background glow effect */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-primary/5 to-transparent rounded-full blur-3xl" />
-                    
-                    {/* Gauge Chart */}
-                    <div className="absolute inset-0 flex justify-center items-end">
-                        <ResponsiveContainer width="100%" height={isMobile ? 200 : 220}>
-                            <PieChart>
-                                <defs>
-                                    {gaugeData.map((entry, index) => (
-                                        <linearGradient key={`grad-${index}`} id={`zoneGradient-${index}`} x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor={entry.color} stopOpacity={entry.opacity} />
-                                            <stop offset="100%" stopColor={entry.color} stopOpacity={entry.opacity * 0.6} />
-                                        </linearGradient>
-                                    ))}
-                                </defs>
-                                <Pie
-                                    data={gaugeData}
-                                    cx="50%"
-                                    cy="100%"
-                                    startAngle={180}
-                                    endAngle={0}
-                                    innerRadius={innerRadius}
-                                    outerRadius={outerRadius}
-                                    dataKey="value"
-                                    stroke="rgba(0,0,0,0.2)"
-                                    strokeWidth={1}
-                                    paddingAngle={1}
-                                >
-                                    {gaugeData.map((entry, index) => (
-                                        <Cell 
-                                            key={`cell-${index}`} 
-                                            fill={`url(#zoneGradient-${index})`}
-                                            className="transition-all duration-300 hover:opacity-100"
-                                            style={{ filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.1))' }}
-                                        />
-                                    ))}
-                                </Pie>
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
 
-                    {/* Needle */}
-                    <div
-                        className="absolute bottom-2 left-1/2 transition-transform duration-1000 ease-out"
-                        style={{
-                            transform: `translateX(-50%) rotate(${needleRotation}deg)`,
-                            transformOrigin: 'bottom center',
-                            zIndex: 20
-                        }}
-                    >
-                        <div className="relative">
-                            <div 
-                                className="bg-gradient-to-t from-foreground to-foreground/80 rounded-full shadow-lg"
-                                style={{ width: isMobile ? 3 : 4, height: needleHeight }}
+            <CardContent className="flex-1 flex flex-col items-center px-4 pb-5 pt-2">
+
+                {/* ── SVG Gauge ──────────────────────────────────────────── */}
+                <svg
+                    viewBox={`0 0 ${SVG_W} ${SVG_H + 16}`}
+                    width="100%"
+                    className="max-w-[300px] overflow-visible"
+                    aria-label={`Momentum score: ${analytics.score}`}
+                >
+                    <defs>
+                        {/* Glow filter for needle */}
+                        <filter id="needle-glow" x="-50%" y="-50%" width="200%" height="200%">
+                            <feGaussianBlur stdDeviation="3" result="blur" />
+                            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                        </filter>
+                        {/* Track shadow */}
+                        <filter id="track-shadow">
+                            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity="0.4" />
+                        </filter>
+                    </defs>
+
+                    {/* Background track */}
+                    <path
+                        d={arcPath(0, 100, R_INNER - 2, R_OUTER + 2)}
+                        fill="hsl(var(--muted) / 0.15)"
+                        filter="url(#track-shadow)"
+                    />
+
+                    {/* Zone arcs */}
+                    {ZONES.map(([s0, s1, color], i) => (
+                        <path
+                            key={i}
+                            d={arcPath(s0, s1, R_INNER, R_OUTER)}
+                            fill={color}
+                            opacity={0.82}
+                        />
+                    ))}
+
+                    {/* Zone separator lines */}
+                    {ZONES.slice(0, -1).map(([, s1], i) => {
+                        const p1 = polar(scoreToAngle(s1), R_INNER - 2);
+                        const p2 = polar(scoreToAngle(s1), R_OUTER + 2);
+                        return (
+                            <line
+                                key={i}
+                                x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                                stroke="hsl(var(--background))"
+                                strokeWidth={2}
+                                strokeOpacity={0.5}
                             />
-                            <div className="absolute -bottom-2 -left-2 w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-foreground border-2 border-background shadow-xl" />
-                        </div>
-                    </div>
+                        );
+                    })}
 
-                    {/* Center decorative element */}
-                    <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-background border-2 border-border flex items-center justify-center shadow-xl z-30">
-                        <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-foreground/60" />
-                    </div>
+                    {/* Tick marks + labels */}
+                    {TICK_VALUES.map((v) => {
+                        const a  = scoreToAngle(v);
+                        const p1 = polar(a, R_OUTER + 3);
+                        const p2 = polar(a, R_OUTER + 12);
+                        const lp = polar(a, R_TICKS + 10);
+                        return (
+                            <g key={v}>
+                                <line
+                                    x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                                    stroke="hsl(var(--muted-foreground) / 0.5)"
+                                    strokeWidth={1.5}
+                                    strokeLinecap="round"
+                                />
+                                <text
+                                    x={lp.x}
+                                    y={lp.y}
+                                    textAnchor="middle"
+                                    dominantBaseline="middle"
+                                    fontSize={9}
+                                    fill="hsl(var(--muted-foreground) / 0.7)"
+                                    fontFamily="monospace"
+                                >
+                                    {v}
+                                </text>
+                            </g>
+                        );
+                    })}
+
+                    {/* Score glow arc (active portion) */}
+                    <path
+                        d={arcPath(0, analytics.score, R_INNER + 4, R_OUTER - 4)}
+                        fill="white"
+                        opacity={0.06}
+                    />
+
+                    {/* Needle (triangle pointing from center to tip) */}
+                    <polygon
+                        points={`${needleTip.x},${needleTip.y} ${needleLeft.x},${needleLeft.y} ${needleRight.x},${needleRight.y}`}
+                        fill="#f1f5f9"
+                        opacity={0.95}
+                    />
+                    {/* Needle tail (short line behind pivot) */}
+                    {(() => {
+                        const tail = polar(displayAngle + 180, 14);
+                        return (
+                            <line
+                                x1={CX} y1={CY}
+                                x2={tail.x} y2={tail.y}
+                                stroke="#e2e8f0e7"
+                                strokeWidth={3}
+                                strokeLinecap="round"
+                            />
+                        );
+                    })()}
+
+                    {/* Pivot hub */}
+                    <circle cx={CX} cy={CY} r={10} fill="#64748b" stroke="rgb(51 65 85 / 0.6)" strokeWidth={2} />
+                    <circle cx={CX} cy={CY} r={4}  fill="#e2e8f0f8" />
+                </svg>
+
+                {/* ── Score score display ──────────────────────────────────── */}
+                <div className="mt-1 text-center">
+                    <span className="text-4xl font-bold tabular-nums tracking-tight text-foreground">
+                        {analytics.score}
+                    </span>
+                    <span className="text-sm text-muted-foreground ml-1 font-mono">/100</span>
                 </div>
 
-                {/* Scale markers */}
-                <div className="relative w-full max-w-[240px] sm:max-w-[280px] mt-4 px-2 sm:px-4">
-                    <div className="flex justify-between text-[10px] sm:text-xs font-mono">
-                        <span className="text-blue-500 font-medium">0</span>
-                        <span className="text-emerald-500 font-medium">25</span>
-                        <span className="text-yellow-500 font-medium">50</span>
-                        <span className="text-orange-500 font-medium">75</span>
-                        <span className="text-rose-500 font-medium">100</span>
-                    </div>
-                    <div className="absolute top-4 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-emerald-500 via-yellow-500 via-orange-500 to-rose-500 rounded-full opacity-30" />
+                {/* ── Metric row ───────────────────────────────────────────── */}
+                <div className="mt-4 w-full grid grid-cols-3 gap-3">
+                    <MetricCell
+                        value={`${analytics.recentWinRate.toFixed(0)}%`}
+                        label="Win Rate"
+                        valueClass={analytics.recentWinRate >= 50 ? "text-emerald-400" : "text-rose-400"}
+                    />
+                    <MetricCell
+                        value={fmtCurrency(analytics.avgPnL)}
+                        label="Avg P&L"
+                        valueClass={analytics.avgPnL >= 0 ? "text-emerald-400" : "text-rose-400"}
+                        mono
+                    />
+                    <MetricCell
+                        value={`${analytics.consistency}%`}
+                        label="Consistency"
+                        valueClass={
+                            analytics.consistency >= 70 ? "text-emerald-400" :
+                            analytics.consistency >= 40 ? "text-amber-400"   : "text-rose-400"
+                        }
+                    />
                 </div>
 
-                {/* Score and metrics */}
-                <div className="mt-4 sm:mt-6 w-full grid grid-cols-3 gap-2 sm:gap-4 px-2 sm:px-4">
-                    <div className="text-center">
-                        <div className="text-xl sm:text-2xl font-bold bg-gradient-to-b from-foreground to-foreground/80 bg-clip-text">
-                            {score}
-                        </div>
-                        <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">Score</div>
+                {/* ── Consistency bar ──────────────────────────────────────── */}
+                <div className="mt-4 w-full">
+                    <div className="flex justify-between text-[10px] text-muted-foreground mb-1.5">
+                        <span>Consistency</span>
+                        <span className="font-mono">{analytics.consistency}%</span>
                     </div>
-                    
-                    <div className="text-center">
-                        <div className="text-xl sm:text-2xl font-bold bg-gradient-to-b from-foreground to-foreground/80 bg-clip-text">
-                            {recentWinRate.toFixed(0)}%
-                        </div>
-                        <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">Win Rate</div>
-                    </div>
-
-                    <div className="text-center">
-                        <div className={cn(
-                            "text-sm sm:text-lg font-mono font-bold",
-                            (avgProfitLoss || 0) >= 0 ? "text-emerald-500" : "text-rose-500"
-                        )}>
-                            {formatCurrency(avgProfitLoss || 0)}
-                        </div>
-                        <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">Avg P&L</div>
-                    </div>
-                </div>
-
-                {/* Consistency meter */}
-                <div className="w-full mt-3 sm:mt-4 px-2 sm:px-4">
-                    <div className="flex justify-between items-center text-[10px] sm:text-xs mb-1">
-                        <span className="text-muted-foreground">Consistency</span>
-                        <span className={cn(
-                            "font-mono font-medium",
-                            consistency >= 70 ? "text-emerald-500" : 
-                            consistency >= 40 ? "text-yellow-500" : "text-rose-500"
-                        )}>
-                            {consistency}%
-                        </span>
-                    </div>
-                    <div className="w-full h-1 sm:h-1.5 bg-muted/30 rounded-full overflow-hidden">
-                        <div 
-                            className="h-full rounded-full bg-gradient-to-r from-blue-500 via-emerald-500 to-yellow-500 transition-all duration-700"
-                            style={{ width: `${consistency}%` }}
+                    <div className="w-full h-1.5 bg-muted/25 rounded-full overflow-hidden">
+                        <div
+                            className="h-full rounded-full transition-all duration-700 ease-out"
+                            style={{
+                                width: `${analytics.consistency}%`,
+                                background: `linear-gradient(90deg,
+                                    #3b82f6 0%, #10b981 50%, #f59e0b 80%, #ef4444 100%)`,
+                                backgroundSize: `${(100 / Math.max(analytics.consistency, 1)) * 100}%`,
+                            }}
                         />
                     </div>
                 </div>
 
-                {/* Mini trend indicators */}
-                <div className="flex gap-3 sm:gap-4 mt-3 sm:mt-4 text-[10px] sm:text-xs text-muted-foreground">
-                    <div className="flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-500/50" />
-                        <span>Profitable</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-rose-500/50" />
-                        <span>Losses</span>
-                    </div>
-                </div>
             </CardContent>
         </Card>
+    );
+}
+
+// ─── Small helpers ─────────────────────────────────────────────────────────────
+function MetricCell({
+    value,
+    label,
+    valueClass,
+    mono,
+}: {
+    value: string;
+    label: string;
+    valueClass?: string;
+    mono?: boolean;
+}) {
+    return (
+        <div className="flex flex-col items-center gap-0.5 py-2 rounded-xl bg-muted/15 border border-border/40">
+            <span className={cn("text-base font-bold tabular-nums", mono && "font-mono", valueClass)}>
+                {value}
+            </span>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</span>
+        </div>
     );
 }

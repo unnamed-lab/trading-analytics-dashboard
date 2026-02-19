@@ -11,6 +11,7 @@ import {
   Clock,
   Loader2,
 } from "lucide-react";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import {
   useAllTrades,
   useMockTrades,
@@ -52,7 +53,9 @@ const TradeHistoryPage = () => {
   const allTrades = connected ? realTrades : mockTrades;
   const isLoading = connected ? realLoading : mockLoading;
 
-  // FILTER: Only show perp fill orders (discriminator 19)
+  // Basic error handling for real trades
+  const isError = connected && (realTrades as any)?.error;
+
   const perpTrades = useMemo(() => {
     return allTrades.filter(t => t.discriminator === 19 || t.tradeType === "perp");
   }, [allTrades]);
@@ -96,8 +99,8 @@ const TradeHistoryPage = () => {
 
     // Side filter
     if (sideFilter !== "all") {
-      filtered = filtered.filter((t) => 
-        sideFilter === "long" 
+      filtered = filtered.filter((t) =>
+        sideFilter === "long"
           ? (t.side === "long" || t.side === "buy")
           : (t.side === "short" || t.side === "sell")
       );
@@ -187,7 +190,10 @@ const TradeHistoryPage = () => {
   }
 
   return (
-    <div className="px-4 sm:px-6 py-5">
+    <div className="px-4 sm:px-6 py-5 relative">
+      {isError && (
+        <ErrorBanner message="Failed to load trades. Please try refreshing." />
+      )}
       {/* Filter bar */}
       <div className="rounded-lg border border-border bg-card p-4 mb-5">
         <div className="flex flex-wrap items-center gap-3 mb-3">
@@ -200,11 +206,10 @@ const TradeHistoryPage = () => {
                 <button
                   key={p}
                   onClick={() => setActivePeriod(p)}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                    activePeriod === p
-                      ? "bg-secondary text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${activePeriod === p
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                    }`}
                 >
                   {p}
                 </button>
@@ -359,11 +364,10 @@ const TradeHistoryPage = () => {
                     </td>
                     <td className="px-5 py-3.5">
                       <span
-                        className={`rounded px-2 py-0.5 text-xs font-bold ${
-                          bullish
-                            ? "bg-profit/15 text-profit"
-                            : "bg-loss/15 text-loss"
-                        }`}
+                        className={`rounded px-2 py-0.5 text-xs font-bold ${bullish
+                          ? "bg-profit/15 text-profit"
+                          : "bg-loss/15 text-loss"
+                          }`}
                       >
                         {formatSide(trade.side)}
                       </span>
@@ -381,16 +385,14 @@ const TradeHistoryPage = () => {
                       -${Math.abs(trade.fees.total).toFixed(2)}
                     </td>
                     <td
-                      className={`px-5 py-3.5 font-mono text-sm font-bold ${
-                        trade.pnl >= 0 ? "text-profit" : "text-loss"
-                      }`}
+                      className={`px-5 py-3.5 font-mono text-sm font-bold ${trade.pnl >= 0 ? "text-profit" : "text-loss"
+                        }`}
                     >
                       {formatPnl(trade.pnl)}
                     </td>
                     <td
-                      className={`px-5 py-3.5 font-mono text-sm ${
-                        trade.pnl >= 0 ? "text-profit" : "text-loss"
-                      }`}
+                      className={`px-5 py-3.5 font-mono text-sm ${trade.pnl >= 0 ? "text-profit" : "text-loss"
+                        }`}
                     >
                       {trade.pnlPercentage >= 0 ? "+" : ""}
                       {trade.pnlPercentage.toFixed(2)}%
@@ -448,11 +450,10 @@ const TradeHistoryPage = () => {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`h-8 w-8 rounded text-sm font-medium transition-colors ${
-                    currentPage === page
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-secondary"
-                  }`}
+                  className={`h-8 w-8 rounded text-sm font-medium transition-colors ${currentPage === page
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-secondary"
+                    }`}
                 >
                   {page}
                 </button>
@@ -462,11 +463,10 @@ const TradeHistoryPage = () => {
                   <span className="text-muted-foreground px-1">…</span>
                   <button
                     onClick={() => setCurrentPage(totalPages)}
-                    className={`h-8 w-8 rounded text-sm font-medium transition-colors ${
-                      currentPage === totalPages
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-secondary"
-                    }`}
+                    className={`h-8 w-8 rounded text-sm font-medium transition-colors ${currentPage === totalPages
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-secondary"
+                      }`}
                   >
                     {totalPages}
                   </button>

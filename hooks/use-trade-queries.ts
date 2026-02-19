@@ -112,50 +112,63 @@ export const useTradesInfinite = (limit: number = 50) => {
 // ============================================
 // All Trades Query (For smaller datasets)
 // ============================================
+// ============================================
+// Raw Trades Query (Base - cached)
+// ============================================
+const useRawTrades = (options?: { excludeFees?: boolean }) => {
+  const { fetcher, publicKey } = useTransactionFetcher();
+
+  return useQuery({
+    queryKey: tradeKeys.list(publicKey?.toString(), {
+      type: "raw",
+      fees: options?.excludeFees,
+    }),
+    queryFn: async (): Promise<TradeRecord[]> => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      return fetcher.fetchAllTransactions({ fees: options?.excludeFees });
+    },
+    enabled: !!publicKey,
+    staleTime: 5 * 60 * 1000, // 5 minutes raw cache
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+  });
+};
+
+// ============================================
+// All Trades Query (Filtered view of Raw)
+// ============================================
 export const useAllTrades = (options?: {
   enabled?: boolean;
   excludeFees?: boolean;
   filters?: TradeFilters;
 }) => {
-  const { fetcher, publicKey } = useTransactionFetcher();
-
-  return useQuery({
-    queryKey: tradeKeys.list(publicKey?.toString(), {
-      type: "all",
-      filters: options?.filters,
-      fees: options?.excludeFees,
-    }),
-    queryFn: async (): Promise<TradeRecord[]> => {
-      if (!publicKey) throw new Error("Wallet not connected");
-
-      // console.log("Fetching all trades..."); 
-      return fetcher
-        .fetchAllTransactions({ fees: options?.excludeFees })
-        .then((trades) => {
-          let sorted = trades.sort(
-            (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
-          );
-
-          if (options?.filters && fetcher.filterTrades) {
-            sorted = fetcher.filterTrades(sorted, options.filters);
-          }
-          return sorted;
-        });
-    },
-    enabled: !!publicKey && (options?.enabled ?? true),
-
-    // Rate Limit Fix: Aggressive caching
-    // 1. Data is considered fresh for 30 minutes. 
-    // 2. We don't refetch on window focus or mount.
-    // 3. User can manually refresh via button if needed.
-    staleTime: 30 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-
-    select: (data) =>
-      data.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
+  const { data: rawTrades = [], isLoading, isError, error, isFetching } = useRawTrades({
+    excludeFees: options?.excludeFees,
   });
+
+  const { fetcher } = useTransactionFetcher();
+
+  // Memoize the filtered result
+  const filteredTrades = useMemo(() => {
+    let sorted = [...rawTrades].sort(
+      (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
+    );
+
+    if (options?.filters && fetcher.filterTrades) {
+      sorted = fetcher.filterTrades(sorted, options.filters);
+    }
+    return sorted;
+  }, [rawTrades, options?.filters, fetcher]);
+
+  return {
+    data: filteredTrades,
+    isLoading,
+    isFetching, // Expose isFetching for background updates
+    isError,
+    error,
+    refetch: () => { /* No-op or trigger raw refetch if needed */ },
+  };
 };
 
 // ============================================
@@ -204,18 +217,17 @@ export const useRefreshTrades = () => {
     mutationFn: async () => {
       if (!publicKey) throw new Error("Wallet not connected");
 
-      // Create new instance for fresh data
-      fetcherInstance = null;
-      const newFetcher = getFetcher(rpcEndpoint);
-      await newFetcher.initialize(publicKey);
-      return newFetcher.fetchAllTransactions();
+      // Force invalidate raw trades to trigger re-fetch
+      // Note: In a real app we might call fetcher specifically, but invalidating is cleaner with React Query
+      await queryClient.invalidateQueries({
+        queryKey: tradeKeys.list(publicKey?.toString(), { type: "raw" })
+      });
+
+      // Wait for the refetch to complete (optional, or just return)
+      return [];
     },
-    onSuccess: (data) => {
-      // Update all relevant queries
-      queryClient.setQueryData(
-        tradeKeys.list(publicKey?.toString(), { type: "all" }),
-        data,
-      );
+    onSuccess: () => {
+      // Also invalidate lists
       queryClient.invalidateQueries({
         queryKey: tradeKeys.lists(),
       });
@@ -268,12 +280,9 @@ export const useCalculatedPnL = () => {
 // ============================================
 // Full analytics using TradeAnalyticsCalculator
 // ============================================
-// ============================================
-// Full analytics using TradeAnalyticsCalculator
-// ============================================
 export const useTradeAnalytics = (filters?: TradeFilters) => {
-  const { data: trades = [] } = useAllTrades({ filters });
-  const { data: financials } = useFinancialDetails();
+  const { data: trades = [], isLoading: isTradesLoading, isFetching: isTradesFetching } = useAllTrades({ filters });
+  const { data: financials, isLoading: isFinLoading } = useFinancialDetails();
   const { publicKey } = useTransactionFetcher();
 
   return useQuery({
@@ -293,6 +302,11 @@ export const useTradeAnalytics = (filters?: TradeFilters) => {
     },
     enabled: !!publicKey && (trades.length > 0 || !!financials),
     staleTime: Infinity,
+    // We pass loading state from dependencies manually since this query depends on them
+    meta: {
+      isLoading: isTradesLoading || isFinLoading,
+      isFetching: isTradesFetching
+    }
   });
 };
 

@@ -7,7 +7,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
 import { useJournals } from "@/hooks/use-journals";
 
-export default function JournalDetail({ params }: { params: { id: string } }) {
+export default function JournalDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { publicKey, signMessage } = useWallet();
   const publicKeyStr = publicKey?.toBase58() ?? null;

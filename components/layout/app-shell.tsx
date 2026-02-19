@@ -9,7 +9,7 @@ import {
   History,
   BookOpen,
 } from "lucide-react";
-import WalletConnectionOverlay from "./wallet-connection-overlay";
+import { WalletOverlay } from "@/components/dashboard/wallet-overlay"; // Updated import
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -125,11 +125,10 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
               <Link
                 key={item.path}
                 href={item.path}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                  active
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${active
                     ? "bg-secondary text-foreground"
                     : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-                }`}
+                  }`}
               >
                 <item.icon className="h-3.5 w-3.5" />
                 {item.label}
@@ -143,7 +142,7 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
       <main>{children}</main>
 
       {/* Wallet overlay */}
-      <WalletConnectionOverlay />
+      <WalletOverlay />
     </div>
   );
 };

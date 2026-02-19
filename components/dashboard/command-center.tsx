@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
 import { TradeFilters } from "@/types";
+import { RefreshCw } from "lucide-react";
 
 interface CommandCenterProps {
     activePeriod?: string;
@@ -20,10 +21,13 @@ export function CommandCenter({
     onFilterChange
 }: CommandCenterProps) {
     // Pass the active period to the hook to filter data
-    const { data: analytics } = useTradeAnalytics({ period: activePeriod });
+    const result = useTradeAnalytics({ period: activePeriod });
+    const analytics = result.data;
+    const isFetching = result.isFetching; // Check if refreshing
 
     const periods = ["24H", "7D", "30D", "ALL"];
 
+    // Fallback if data is ensuring layout doesn't jump too much
     if (!analytics) return null;
 
     const { totalPnL, realizedPnl = 0, unrealizedPnl = 0 } = analytics.core;
@@ -36,9 +40,15 @@ export function CommandCenter({
                 {/* Left: Brand or Context */}
                 <div className="flex items-center space-x-4">
                     <div className="flex flex-col">
-                        <span className="text-xs text-muted-foreground uppercase tracking-widest font-semibold">
-                            Net PnL
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground uppercase tracking-widest font-semibold">
+                                Net PnL
+                            </span>
+                            {isFetching && (
+                                <RefreshCw className="w-3 h-3 text-muted-foreground animate-spin" />
+                            )}
+                        </div>
+
                         <div className="flex items-baseline space-x-2">
                             <span
                                 className={cn(

@@ -5,14 +5,24 @@ import {
   X,
   Share2,
   CheckCircle,
-  Sparkles,
-  RefreshCw,
   Loader2,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpRight,
+  ArrowDownRight,
+  Target,
+  Layers,
+  DollarSign,
+  Activity,
+  ChevronRight,
+  Calendar,
+  Hash,
+  Tag,
+  PenLine,
 } from "lucide-react";
 import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl } from "@/types";
 import formatBigNumber, { shortenHash } from "@/utils/number-format";
-import { useAITradeReview, useGenerateAIReview } from "@/hooks/use-ai-review";
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
@@ -34,14 +44,6 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
     return null;
   }
 
-  const {
-    data: aiReview,
-    isLoading: aiLoading,
-    refetch: refetchReview,
-  } = useAITradeReview(trade, !!trade);
-
-  const generateReview = useGenerateAIReview();
-  const [regenerating, setRegenerating] = useState(false);
   const { publicKey, signMessage } = useWallet();
 
   const publicKeyStr = publicKey?.toBase58() ?? null;
@@ -99,293 +101,224 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
     setTags(tags.filter(t => t !== tagToRemove));
   };
 
-  // cached review info (client-only)
-  let cachedMinutes: number | null = null;
-  try {
-    if (typeof window !== "undefined" && window.localStorage) {
-      const raw = localStorage.getItem(`ai-review:${trade.id}`);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { timestamp: number; data: any };
-        if (parsed?.timestamp) {
-          cachedMinutes = Math.round((Date.now() - parsed.timestamp) / 60000);
-        }
-      }
-    }
-  } catch (e) {
-    cachedMinutes = null;
-  }
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className="fixed inset-0 z-50 flex items-center justify-end">
       <div
-        className="flex-1 bg-background/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-background/40 backdrop-blur-md transition-opacity"
         onClick={onClose}
       />
-      <div className="w-full bg-background sm:w-105 lg:w-130 border-l border-border overflow-y-auto animate-slide-in-right flex flex-col">
+      <div className="relative h-full w-full bg-background/80 backdrop-blur-xl sm:w-110 lg:w-130 border-l border-border/50 shadow-2xl animate-slide-in-right flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-border">
-          <div className="flex items-center gap-3">
-            <span className="font-mono truncate text-xs text-muted-foreground w-30">
-              #{trade.id}
-            </span>
-            <span className="font-mono text-sm font-bold text-primary">
-              {trade.symbol}
-            </span>
-            <span
-              className={`rounded border px-2 py-0.5 text-xs font-bold ${bullish ? "border-profit text-profit" : "border-loss text-loss"
-                }`}
-            >
-              {formatSide(trade.side)}
-            </span>
+        <div className="flex items-center justify-between p-6 border-b border-border/40 bg-card/10">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <Hash className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
+                Trade {shortenHash(trade.id)}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <h2 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                {trade.symbol}
+              </h2>
+              <Badge
+                variant="outline"
+                className={`text-xs font-bold px-2 py-0.5 ${bullish
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                  : "border-rose-500/30 bg-rose-500/10 text-rose-500"
+                  }`}
+              >
+                {formatSide(trade.side)}
+              </Badge>
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <button className="p-1.5 rounded hover:bg-secondary text-muted-foreground">
+            <button className="p-2 rounded-full hover:bg-secondary/50 text-muted-foreground transition-colors border border-border/30">
               <Share2 className="h-4 w-4" />
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded hover:bg-secondary text-muted-foreground"
+              className="p-2 rounded-full hover:bg-rose-500/10 hover:text-rose-500 text-muted-foreground transition-all border border-border/30"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Profit Banner */}
-        <div
-          className={`mx-5 mt-5 rounded-lg p-4 flex items-center justify-between ${isProfitable
-              ? "bg-profit/10 border border-profit/30"
-              : "bg-loss/10 border border-loss/30"
-            }`}
-        >
-          <div className="flex items-center gap-2">
-            <CheckCircle
-              className={`h-5 w-5 ${isProfitable ? "text-profit" : "text-loss"}`}
-            />
-            <span
-              className={`text-sm font-bold uppercase ${isProfitable ? "text-profit" : "text-loss"}`}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          {/* Profit Banner */}
+          <div className="px-6 pt-6">
+            <div
+              className={`relative rounded-2xl p-6 overflow-hidden border ${isProfitable
+                ? "border-emerald-500/20 bg-emerald-500/5 shadow-[0_0_20px_rgba(16,185,129,0.05)]"
+                : "border-rose-500/20 bg-rose-500/5 shadow-[0_0_20px_rgba(244,63,94,0.05)]"
+                }`}
             >
-              {isProfitable ? "Profitable" : "Loss"}
-            </span>
-          </div>
-          <div className="text-right">
-            <p
-              className={`font-mono text-2xl font-bold ${isProfitable ? "text-profit" : "text-loss"}`}
-            >
-              {formatPnl(trade.pnl)}
-            </p>
-            <p
-              className={`font-mono text-xs ${isProfitable ? "text-profit" : "text-loss"}`}
-            >
-              {trade.pnlPercentage >= 0 ? "+" : ""}
-              {trade.pnlPercentage.toFixed(1)}% ROI
-            </p>
-          </div>
-        </div>
-
-        {/* Execution Data */}
-        <div className="p-5">
-          <h4 className="text-xs font-medium tracking-wider text-muted-foreground uppercase mb-3">
-            Execution Data
-          </h4>
-          <div className="grid grid-cols-3 gap-px bg-border rounded-lg overflow-hidden">
-            <div className="bg-card p-3">
-              <span className="text-xs text-muted-foreground">Entry Price</span>
-              <p className="font-mono text-sm text-primary mt-1">
-                {formatPrice(trade.entryPrice)}
-              </p>
-            </div>
-            <div className="bg-card p-3">
-              <span className="text-xs text-muted-foreground">Exit Price</span>
-              <p
-                className={`font-mono text-sm mt-1 ${isProfitable ? "text-profit" : "text-loss"}`}
-              >
-                {formatPrice(trade.exitPrice)}
-              </p>
-            </div>
-            <div className="bg-card p-3">
-              <span className="text-xs text-muted-foreground">Quantity</span>
-              <p className="font-mono text-sm text-primary mt-1">
-                {formatBigNumber(trade.quantity, 2)}{" "}
-                {trade.symbol.split("/")[0]}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Risk Analysis */}
-        <div className="p-5">
-          <h4 className="text-xs font-medium tracking-wider text-muted-foreground uppercase mb-3">
-            Risk Analysis
-          </h4>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              {
-                label: "RISK/REWARD",
-                value: isProfitable
-                  ? `1:${(Math.abs(trade.pnlPercentage) / 2).toFixed(1)}`
-                  : "Negative",
-              },
-              {
-                label: "FEES",
-                value: `-$${trade.fees.total.toFixed(2)}`,
-                negative: true,
-              },
-              {
-                label: "ORDER TYPE",
-                value: trade.orderType?.toUpperCase(),
-                primary: true,
-              },
-            ].map((m) => (
-              <div
-                key={m.label}
-                className="rounded-lg border border-border bg-secondary/30 p-3"
-              >
-                <span className="text-[10px] tracking-wider text-muted-foreground uppercase">
-                  {m.label}
-                </span>
-                <p
-                  className={`font-mono text-lg font-bold mt-1 ${m.negative
-                      ? "text-loss"
-                      : m.primary
-                        ? "text-primary"
-                        : "text-foreground"
-                    }`}
-                >
-                  {m.value}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* AI Insight */}
-        <div className="px-5 pb-5">
-          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 glow-primary">
-            <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="h-4 w-4 text-primary" />
-              <span className="text-sm font-semibold text-primary">
-                Deriverse AI Insight
-              </span>
-            </div>
-            <div className="flex flex-col items-start justify-between gap-3">
-              <div className="flex-1">
-                {aiLoading || regenerating ? (
-                  <div className="space-y-3 animate-pulse">
-                    <div className="h-4 w-1/3 bg-muted-foreground/10 rounded" />
-                    <div className="h-3 w-full bg-muted-foreground/8 rounded" />
-                    <div className="h-3 w-5/6 bg-muted-foreground/8 rounded" />
-                    <div className="h-3 w-3/4 bg-muted-foreground/8 rounded" />
-                  </div>
-                ) : aiReview ? (
-                  <div className="flex-col">
-                    <p className="text-xs text-muted-foreground leading-relaxed mb-2">
-                      {aiReview.performanceCritique}
-                    </p>
-                    <p className="text-xs text-muted-foreground leading-relaxed mb-2">
-                      {aiReview.emotionalReview}
-                    </p>
-                    <div className="text-xs text-foreground">
-                      <strong>Actionable:</strong>
-                      <ul className="list-disc list-inside mt-2">
-                        {aiReview.actionableInsights.slice(0, 5).map((a, i) => (
-                          <li key={i} className="mt-1">
-                            {a}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
+              <div className="absolute top-0 right-0 p-4 opacity-10">
+                {isProfitable ? (
+                  <TrendingUp className="h-20 w-20 text-emerald-500" />
                 ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No AI review available.
-                  </p>
+                  <TrendingDown className="h-20 w-20 text-rose-500" />
                 )}
               </div>
 
-              <div className="flex-shrink-0 flex  items-end gap-2">
-                <button
-                  onClick={async () => {
-                    try {
-                      setRegenerating(true);
-                      await generateReview.mutateAsync({
-                        trade,
-                        journalContent:
-                          trade.notes || "No journal entry provided",
-                        context: { recentTrades: [] },
-                      });
-                      refetchReview();
-                    } finally {
-                      setRegenerating(false);
-                    }
-                  }}
-                  className="flex items-center gap-2 rounded px-3 py-1 text-xs border border-border bg-secondary/5 hover:bg-secondary"
-                >
-                  <RefreshCw className="h-3 w-3" /> Regenerate
-                </button>
-                <div className="text-[10px] text-muted-foreground/60 italic text-right">
-                  <div>{aiReview?.disclaimer || "Not financial advice."}</div>
-                  {cachedMinutes !== null && (
-                    <div className="text-[10px] text-muted-foreground/50 mt-1">
-                      Cached {cachedMinutes}m ago
-                    </div>
-                  )}
+              <div className="relative flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle
+                      className={`h-4 w-4 ${isProfitable ? "text-emerald-500" : "text-rose-500"}`}
+                    />
+                    <span
+                      className={`text-[10px] font-bold uppercase tracking-widest ${isProfitable ? "text-emerald-500" : "text-rose-500"}`}
+                    >
+                      {isProfitable ? "Successful Execution" : "Negative Outcome"}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-4xl font-mono font-bold tracking-tighter ${isProfitable ? "text-emerald-500" : "text-rose-500"}`}>
+                      {formatPnl(trade.pnl)}
+                    </span>
+                    <span className={`text-sm font-mono font-medium ${isProfitable ? "text-emerald-500/70" : "text-rose-500/70"}`}>
+                      {trade.pnlPercentage >= 0 ? "+" : ""}
+                      {trade.pnlPercentage.toFixed(2)}%
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Trade metadata */}
-        <div className="px-5 pb-5">
-          <div className="text-xs text-muted-foreground space-y-1">
-            <p>
-              <span className="text-muted-foreground/70">Tx:</span>{" "}
-              <span className="font-mono" title={trade.transactionHash}>
-                {shortenHash(trade.transactionHash)}
-              </span>
-            </p>
-            <p>
-              <span className="text-muted-foreground/70">Type:</span>{" "}
-              {trade.tradeType?.toUpperCase()} •{" "}
-              {trade.orderType?.toUpperCase()}
-            </p>
+          {/* Execution Metrics */}
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-card/30 backdrop-blur-sm border border-border/40 rounded-xl p-4 transition-all hover:border-border/60">
+                <div className="flex items-center gap-2 mb-2">
+                  <Target className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium">Position Size</span>
+                </div>
+                <div className="font-mono text-lg font-bold text-foreground">
+                  {formatBigNumber(trade.quantity, 2)} <span className="text-xs text-muted-foreground">{trade.symbol.split("/")[0]}</span>
+                </div>
+              </div>
+
+              <div className="bg-card/30 backdrop-blur-sm border border-border/40 rounded-xl p-4 transition-all hover:border-border/60">
+                <div className="flex items-center gap-2 mb-2">
+                  <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium">Total Fees</span>
+                </div>
+                <div className="font-mono text-lg font-bold text-rose-500">
+                  -${trade.fees.total.toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-card/20 border border-border/40 rounded-xl overflow-hidden">
+              <div className="grid grid-cols-2 border-b border-border/40">
+                <div className="p-4 border-r border-border/40">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block mb-1">Avg Entry</span>
+                  <span className="font-mono text-sm font-semibold">{formatPrice(trade.entryPrice)}</span>
+                </div>
+                <div className="p-4">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block mb-1">Avg Exit</span>
+                  <span className={`font-mono text-sm font-semibold ${isProfitable ? "text-emerald-500" : "text-rose-500"}`}>
+                    {formatPrice(trade.exitPrice)}
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2">
+                <div className="p-4 border-r border-border/40">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block mb-1">Type</span>
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-3 w-3 text-primary/70" />
+                    <span className="text-xs font-medium uppercase">{trade.tradeType}</span>
+                  </div>
+                </div>
+                <div className="p-4">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block mb-1">Order</span>
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-3 w-3 text-primary/70" />
+                    <span className="text-xs font-medium uppercase">{trade.orderType}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Journaling */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <PenLine className="h-4 w-4" />
+                  <span className="text-xs font-semibold uppercase tracking-widest">Trade Journal</span>
+                </div>
+              </div>
+              <textarea
+                value={journalContent}
+                onChange={(e) => setJournalContent(e.target.value)}
+                placeholder="What was the setup? Any mistakes? Emotions during the trade..."
+                className="w-full min-h-[160px] rounded-xl border border-border/40 bg-card/10 p-4 text-sm focus:outline-none focus:ring-1 focus:ring-primary/40 resize-none transition-all placeholder:text-muted-foreground/30"
+              />
+            </div>
+
+            {/* Tags */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Tag className="h-4 w-4" />
+                <span className="text-xs font-semibold uppercase tracking-widest">Tags</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {tags.map(tag => (
+                  <Badge
+                    key={tag}
+                    variant="secondary"
+                    className="pl-2 pr-1 py-1 rounded-md bg-secondary/50 hover:bg-rose-500/10 hover:text-rose-500 group transition-all border border-border/40 cursor-pointer"
+                    onClick={() => removeTag(tag)}
+                  >
+                    <span className="text-xs">{tag}</span>
+                    <X className="h-3 w-3 ml-1.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </Badge>
+                ))}
+                <div className="relative">
+                  <Input
+                    className="h-8 text-xs bg-transparent border-dashed border-border/60 w-32 focus-visible:ring-0 focus-visible:border-primary/60 transition-all"
+                    placeholder="+ Add tag..."
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        addTag(e.currentTarget.value);
+                        e.currentTarget.value = '';
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Meta */}
+            <div className="pt-4 border-t border-border/40 space-y-3">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground tracking-wider uppercase">
+                <span>Transaction details</span>
+                <span className="font-mono text-[9px] lowercase opacity-50"># {trade.transactionHash.slice(0, 16)}...</span>
+              </div>
+              <div className="flex flex-wrap gap-x-6 gap-y-2">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-3 w-3 opacity-50" />
+                  <span className="text-xs text-muted-foreground/80">{new Date(trade.timestamp).toLocaleString()}</span>
+                </div>
+                <a
+                  href={`https://solscan.io/tx/${trade.transactionHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 text-xs text-primary/70 hover:text-primary transition-colors underline underline-offset-4 decoration-primary/20"
+                >
+                  View on Explorer <ChevronRight className="h-3 w-3" />
+                </a>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="px-5 pb-5">
-          <label className="text-xs text-muted-foreground">Journal</label>
-          <textarea
-            value={journalContent}
-            onChange={(e) => setJournalContent(e.target.value)}
-            className="w-full mt-2 min-h-[120px] rounded-md border border-border bg-card p-3 text-sm"
-          />
-        </div>
-
-        {/* Tags */}
-        <div className="px-5 pb-5">
-          <label className="text-xs text-muted-foreground">Tags</label>
-          <div className="flex flex-wrap gap-2 mt-2 mb-2">
-            {tags.map(tag => (
-              <Badge key={tag} variant="secondary" className="cursor-pointer hover:bg-destructive/20 pr-1" onClick={() => removeTag(tag)}>
-                {tag} <X className="h-3 w-3 ml-1 hover:text-destructive" />
-              </Badge>
-            ))}
-          </div>
-          <Input
-            className="h-8 text-xs"
-            placeholder="Add tag (Press Enter)"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                addTag(e.currentTarget.value);
-                e.currentTarget.value = '';
-              }
-            }}
-          />
-        </div>
-
-        <div className="mt-auto border-t border-border p-5 flex gap-3">
+        {/* Footer Actions */}
+        <div className="p-6 border-t border-border/40 bg-card/10 flex gap-4">
           <button
             onClick={async () => {
               try {
@@ -396,12 +329,12 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
               }
             }}
             disabled={!existing || remove.isPending}
-            className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-60"
+            className="flex-1 rounded-xl border border-rose-500/20 py-3 text-sm font-medium text-rose-500 hover:bg-rose-500/10 transition-all disabled:opacity-30 disabled:grayscale"
           >
             {remove.isPending ? (
               <Loader2 className="animate-spin h-4 w-4 mx-auto" />
             ) : (
-              "Delete Log"
+              "Delete Entry"
             )}
           </button>
           <button
@@ -426,12 +359,12 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
               }
             }}
             disabled={create.isPending || update.isPending}
-            className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-60"
+            className="flex-[2] rounded-xl bg-primary py-3 text-sm font-bold text-primary-foreground hover:shadow-[0_0_20px_rgba(var(--primary),0.3)] hover:brightness-110 transition-all disabled:opacity-50"
           >
             {create.isPending || update.isPending ? (
               <Loader2 className="animate-spin h-4 w-4 mx-auto" />
             ) : (
-              "Save Changes"
+              "Save Review"
             )}
           </button>
         </div>

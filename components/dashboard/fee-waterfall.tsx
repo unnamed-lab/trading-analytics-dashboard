@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ReferenceLine } from "recharts";
 import { TradeFilters } from "@/types";
+import { cn } from "@/lib/utils";
 
 export function FeeWaterfall({ filters }: { filters?: TradeFilters }) {
     const { data: analytics } = useTradeAnalytics(filters);
@@ -75,7 +76,7 @@ export function FeeWaterfall({ filters }: { filters?: TradeFilters }) {
                                     return (
                                         <div className="bg-popover/95 border border-border rounded-xl p-3 shadow-xl backdrop-blur-md text-xs">
                                             <p className="font-bold mb-1 text-popover-foreground">{d.name}</p>
-                                            <p className="font-mono text-emerald-400">${d.value.toFixed(2)}</p>
+                                            <p className={cn("font-mono", d.value >= 0 ? "text-emerald-400" : "text-rose-400")}>${d.value.toFixed(2)}</p>
                                         </div>
                                     );
                                 }

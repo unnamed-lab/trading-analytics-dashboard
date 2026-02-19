@@ -59,6 +59,7 @@ export interface TradeRecord extends Partial<TradeComprehensiveRecord> {
   discriminator?: number;
   rawLogMessage?: string;
   rawData?: any;
+  tags?: Array<string>;
 }
 
 export interface TradeComprehensiveRecord {

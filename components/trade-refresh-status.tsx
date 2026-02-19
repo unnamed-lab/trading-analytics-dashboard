@@ -1,16 +1,16 @@
 // components/trade-refresh-status.tsx
 "use client";
 
-import { useRefreshTradeData } from "@/hooks/use-trade-data";
 import { useUIStore } from "@/lib/stores/trade-store";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRefreshTrades } from "@/hooks/use-trade-queries";
 
 export function TradeRefreshStatus() {
   const { publicKey } = useWallet();
   const { isDemoMode, isRefreshing } = useUIStore();
-  const refreshMutation = useRefreshTradeData();
+  const refreshMutation = useRefreshTrades();
 
   if (isDemoMode || !publicKey) {
     return null;

@@ -1049,7 +1049,9 @@ export class TransactionDataFetcher {
             const perpFill = event as PerpFillOrderReportModel;
             const symbol = "SOL";
 
-            const isLong = perpFill.side === 0;
+            // FIXED: Inverted logic based on user observation (PnL signs were flipped)
+            // side 0 = Short/Sell, side 1 = Long/Buy
+            const isLong = perpFill.side === 1;
             const quantity = toNum(perpFill.perps);
             const price = toNum(perpFill.price);
 

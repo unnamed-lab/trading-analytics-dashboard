@@ -132,7 +132,65 @@ const TradeHistory = ({
             View All
           </Link>
         </div>
-        <div className="overflow-x-auto">
+
+        {/* Mobile View: Cards */}
+        <div className="md:hidden px-4 pb-4 space-y-3">
+          {recentTrades.map((trade) => {
+            const bullish = isBullishSide(trade.side);
+            return (
+              <div
+                key={trade.id}
+                className="bg-secondary/20 rounded-lg p-3 border border-border/50 hover:bg-secondary/40 transition-colors cursor-pointer"
+                onClick={() => setSelectedTrade(trade)}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex flex-col">
+                    <span className="font-mono text-sm font-bold text-foreground">{trade.symbol}</span>
+                    <span className="text-xs text-muted-foreground">{new Date(trade.timestamp).toLocaleDateString()}</span>
+                  </div>
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${bullish
+                      ? "bg-profit/15 text-profit"
+                      : "bg-loss/15 text-loss"
+                      }`}
+                  >
+                    {formatSide(trade.side)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-muted-foreground block">Price</span>
+                    <span className="font-mono">{formatPrice(trade.entryPrice)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-right">Size</span>
+                    <span className="font-mono text-right block">{formatQuantity(trade.quantity)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">PnL</span>
+                    <span
+                      className={`font-mono font-bold ${trade.pnl >= 0 ? "text-profit" : "text-loss"
+                        }`}
+                    >
+                      {formatPnl(trade.pnl)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-right">ROI</span>
+                    <span className={`font-mono block text-right ${trade.pnlPercentage >= 0 ? "text-profit" : "text-loss"}`}>
+                      {trade.pnlPercentage >= 0 ? "+" : ""}
+                      {trade.pnlPercentage.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop View: Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full min-w-180 table-auto">
             <thead>
               <tr className="border-t border-border">

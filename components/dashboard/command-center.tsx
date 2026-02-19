@@ -36,9 +36,9 @@ export function CommandCenter({
     return (
         <div className="w-full mb-6 z-50 relative py-3.5">
             <div className="absolute inset-0 bg-background/80 backdrop-blur-md border-b border-border/50 shadow-sm" />
-            <div className="container mx-auto relative flex items-center justify-between py-3 px-4">
+            <div className="container mx-auto relative flex flex-col sm:flex-row items-center justify-between gap-4 py-3 px-4">
                 {/* Left: Brand or Context */}
-                <div className="flex items-center space-x-4">
+                <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-4">
                     <div className="flex flex-col">
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-muted-foreground uppercase tracking-widest font-semibold">
@@ -72,10 +72,10 @@ export function CommandCenter({
                         </div>
                     </div>
 
-                    <div className="h-8 w-px bg-border/50 mx-4" />
+                    <div className="h-8 w-px bg-border/50 mx-4 hidden sm:block" />
 
                     {/* Realized vs Unrealized Pill */}
-                    <div className="flex flex-col space-y-1">
+                    <div className="flex flex-col space-y-1 items-end sm:items-start">
                         <div className="flex items-center space-x-2 text-xs">
                             <span className="text-muted-foreground">R:</span>
                             <span
@@ -107,7 +107,7 @@ export function CommandCenter({
                 </div>
 
                 {/* Right: Period Filter */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between w-full sm:w-auto gap-2">
                     {filters?.symbol && (
                         <Badge
                             variant="secondary"
@@ -133,13 +133,13 @@ export function CommandCenter({
                             </svg>
                         </Badge>
                     )}
-                    <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-lg border border-border/50">
+                    <div className="flex flex-1 sm:flex-none items-center justify-center gap-2 bg-muted/50 p-1 rounded-lg border border-border/50 overflow-x-auto">
                         {periods.map((p) => (
                             <button
                                 key={p}
                                 onClick={() => onPeriodChange?.(p)}
                                 className={cn(
-                                    "px-3 py-1 text-xs font-medium rounded-md transition-all",
+                                    "px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap",
                                     activePeriod === p
                                         ? "bg-background text-foreground shadow-sm ring-1 ring-border"
                                         : "text-muted-foreground hover:text-foreground hover:bg-background/50"

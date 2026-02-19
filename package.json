@@ -13,7 +13,15 @@
     "test:fetcher:full": "tsx scripts/fetch-data.script.ts full",
     "test:fetcher:instrument": "tsx scripts/fetch-data.script.ts instrument",
     "test:analytics": "tsx scripts/trade-analytics.script.ts",
-    "debug:kit": "tsx scripts/debug-deriverse-kit.ts"
+    "debug:kit": "tsx scripts/debug-deriverse-kit.ts",
+    "prebuild": "pnpm db:generate && pnpm db:migrate:deploy",
+    "db:reset": "prisma migrate reset",
+    "db:studio": "prisma studio",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:setup": "prisma generate && prisma migrate dev",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@deriverse/kit": "1.0.41",

@@ -27,7 +27,7 @@ export class TradeAnalyticsCalculator {
   /**
    * Calculate core metrics (aligned with the library's CoreMetrics)
    */
-  calculateCoreMetrics() {
+  calculateCoreMetrics(currentPrices?: Map<string, number>) {
     const trades = this.pnlCalculatedTrades;
 
     const totalPnL = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
@@ -50,6 +50,17 @@ export class TradeAnalyticsCalculator {
     const winRate =
       trades.length > 0 ? (winningTrades / trades.length) * 100 : 0;
 
+    // Calculate Unrealized PnL if prices are provided
+    let unrealizedPnl = 0;
+    let unrealizedPositions: any[] = [];
+
+    if (currentPrices) {
+      const calculator = new PnLCalculator(this.trades);
+      const result = calculator.calculateUnrealizedPnL(currentPrices);
+      unrealizedPnl = result.totalUnrealizedPnL;
+      unrealizedPositions = result.positions;
+    }
+
     return {
       totalPnL,
       totalVolume,
@@ -61,8 +72,9 @@ export class TradeAnalyticsCalculator {
       winningTrades,
       losingTrades,
       winRate,
-      realizedPnl: totalPnL, // Assuming all PnL is realized for now, pending open position logic
-      unrealizedPnl: 0,
+      realizedPnl: totalPnL,
+      unrealizedPnl,
+      unrealizedPositions,
     };
   }
 
@@ -429,9 +441,9 @@ export class TradeAnalyticsCalculator {
   /**
    * Generate complete analytics report
    */
-  generateFullReport() {
+  generateFullReport(currentPrices?: Map<string, number>) {
     return {
-      core: this.calculateCoreMetrics(),
+      core: this.calculateCoreMetrics(currentPrices),
       longShort: this.calculateLongShortRatio(),
       risk: this.calculateRiskMetrics(),
       drawdown: this.calculateDrawdown(),

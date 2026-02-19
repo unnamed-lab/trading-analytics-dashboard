@@ -34,7 +34,7 @@ export function CommandCenter({
     const isProfitable = totalPnL >= 0;
 
     return (
-        <div className="w-full mb-6 z-50 relative">
+        <div className="w-full mb-6 z-50 relative py-3.5">
             <div className="absolute inset-0 bg-background/80 backdrop-blur-md border-b border-border/50 shadow-sm" />
             <div className="container mx-auto relative flex items-center justify-between py-3 px-4">
                 {/* Left: Brand or Context */}

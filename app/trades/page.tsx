@@ -314,9 +314,8 @@ const TradeHistoryPage = () => {
                   "Date",
                   "Symbol",
                   "Side",
-                  "Entry Price",
-                  "Exit Price",
-                  "Quantity",
+                  "Price",
+                  "Quantity (SOL)",
                   "Fees",
                   "PnL",
                   "ROI %",
@@ -374,9 +373,6 @@ const TradeHistoryPage = () => {
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
                       {formatPrice(trade.entryPrice)}
-                    </td>
-                    <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
-                      {formatPrice(trade.exitPrice)}
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
                       {formatQuantity(trade.quantity)}

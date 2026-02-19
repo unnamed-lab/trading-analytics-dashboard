@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Sparkles, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
+import { AlertTriangle, RefreshCw, ChevronRight, TrendingUp, Target } from "lucide-react";
 import { useTradeAnalytics, useCalculatedPnL } from "@/hooks/use-trade-queries";
 import {
   useBatchAITradeReviews,
@@ -78,7 +78,7 @@ const AIInsights = ({
       title: "Actionable Insight",
       description: text,
       type: "action" as const,
-      icon: Sparkles,
+      icon: Target,
     })),
   ];
 
@@ -120,7 +120,7 @@ const AIInsights = ({
         {sessionInsights.map((insight, idx) => (
           <InsightCard
             key={`session-${idx}`}
-            icon={insight.type === "warning" ? AlertTriangle : Sparkles}
+            icon={insight.type === "warning" ? AlertTriangle : TrendingUp}
             title={insight.title}
             description={insight.description}
             badge={insight.badge}
@@ -132,7 +132,7 @@ const AIInsights = ({
         {riskInsights.map((insight, idx) => (
           <InsightCard
             key={`risk-${idx}`}
-            icon={insight.type === "warning" ? AlertTriangle : Sparkles}
+            icon={insight.type === "warning" ? AlertTriangle : RefreshCw}
             title={insight.title}
             description={insight.description}
             badge={insight.badge}
@@ -170,8 +170,9 @@ const AIInsights = ({
                 </p>
                 {showDetailed &&
                   review.actionableInsights.slice(0, 1).map((insight, i) => (
-                    <p key={i} className="text-xs text-foreground mt-1">
-                      💡 {insight}
+                    <p key={i} className="text-xs text-foreground mt-1 flex items-start gap-1.5">
+                      <ChevronRight className="h-3 w-3 mt-0.5 text-primary shrink-0" />
+                      {insight}
                     </p>
                   ))}
               </div>

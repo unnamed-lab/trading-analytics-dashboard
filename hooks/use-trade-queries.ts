@@ -283,7 +283,7 @@ export const useCalculatedPnL = () => {
 export const useTradeAnalytics = (filters?: TradeFilters) => {
   const { data: trades = [], isLoading: isTradesLoading, isFetching: isTradesFetching } = useAllTrades({ filters });
   const { data: financials, isLoading: isFinLoading } = useFinancialDetails();
-  const { publicKey } = useTransactionFetcher();
+  const { publicKey, fetcher } = useTransactionFetcher();
 
   return useQuery({
     queryKey: [
@@ -294,14 +294,19 @@ export const useTradeAnalytics = (filters?: TradeFilters) => {
     ],
     queryFn: async () => {
       if (!publicKey) throw new Error("Wallet not connected");
+
+      // Fetch prices for unrealized PnL (cached 1 min)
+      const currentPrices = await fetcher.fetchCurrentPrices();
+
       // Note: useAllTrades already filters the trades if filters are passed.
       // So we just need to calculate analytics on the returned trades.
       const analytics = new TradeAnalyticsCalculator(trades, financials);
-      const report = analytics.generateFullReport();
+      const report = analytics.generateFullReport(currentPrices);
       return report;
     },
     enabled: !!publicKey && (trades.length > 0 || !!financials),
-    staleTime: Infinity,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000, // 1 minute refresh
     // We pass loading state from dependencies manually since this query depends on them
     meta: {
       isLoading: isTradesLoading || isFinLoading,

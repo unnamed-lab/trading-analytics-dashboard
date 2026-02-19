@@ -18,10 +18,32 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
 
     // Explicit typing for the map iteration
     const pnlMap = dailyPnl || new Map<string, number>();
+
+    // Calculate dynamic range for intensity
+    let maxAbsPnl = 0;
+    pnlMap.forEach((pnl) => {
+        const abs = Math.abs(pnl);
+        if (abs > maxAbsPnl) maxAbsPnl = abs;
+    });
+    if (maxAbsPnl === 0) maxAbsPnl = 100; // prevent divide by zero
+
     const value = Array.from<[string, number]>(pnlMap.entries()).map(([dateStr, pnl]: [string, number]) => {
         let intensity = 0;
-        if (pnl > 0) intensity = pnl > 1000 ? 14 : pnl > 500 ? 13 : pnl > 100 ? 12 : 11;
-        if (pnl < 0) intensity = pnl < -1000 ? 4 : pnl < -500 ? 3 : pnl < -100 ? 2 : 1;
+
+        // Normalize PnL to 0-4 scale for each side (5 levels: 1-5 for loss, 11-15 for win)
+        // Level 1/11: 0-20% of max
+        // Level 2/12: 20-40% of max
+        // ...
+
+        const ratio = Math.abs(pnl) / maxAbsPnl;
+        const level = Math.ceil(ratio * 5); // 1 to 5
+        const clampedLevel = Math.max(1, Math.min(5, level));
+
+        if (pnl > 0) {
+            intensity = 10 + clampedLevel; // 11 to 15
+        } else if (pnl < 0) {
+            intensity = clampedLevel; // 1 to 5
+        }
 
         return {
             date: dateStr.replace(/-/g, '/'),
@@ -95,15 +117,21 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
                         rectSize={12}
                         space={3}
                         panelColors={{
-                            0: '#27272a',
-                            1: '#fda4af',
-                            2: '#f43f5e',
-                            3: '#be123c',
-                            4: '#881337',
-                            11: '#6ee7b7',
-                            12: '#10b981',
-                            13: '#047857',
-                            14: '#064e3b',
+                            0: '#27272a', // empty
+
+                            // Losses (Dark Red -> Bright Red)
+                            1: '#7f1d1d', // 0-20%
+                            2: '#991b1b', // 20-40%
+                            3: '#b91c1c', // 40-60%
+                            4: '#dc2626', // 60-80%
+                            5: '#ef4444', // 80-100%
+
+                            // Wins (Dark Green -> Bright Green)
+                            11: '#064e3b', // 0-20%
+                            12: '#065f46', // 20-40%
+                            13: '#047857', // 40-60%
+                            14: '#059669', // 60-80%
+                            15: '#10b981', // 80-100%
                         }}
                         rectProps={{
                             rx: 2.5

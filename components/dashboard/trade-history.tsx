@@ -144,10 +144,8 @@ const TradeHistory = ({
                   "Date",
                   "Symbol",
                   "Side",
-                  "Tags",
-                  "Entry Price",
-                  "Exit Price",
-                  "Quantity",
+                  "Price",
+                  "Quantity (SOL)",
                   "PnL",
                 ].map((h) => (
                   <th
@@ -163,7 +161,6 @@ const TradeHistory = ({
               {recentTrades.map((trade) => {
                 const bullish = isBullishSide(trade.side);
                 const journal = journalMap.get(trade.id);
-                const hasNotes = !!(journal?.content || trade.notes);
 
                 return (
                   <tr
@@ -196,28 +193,8 @@ const TradeHistory = ({
                       </span>
                     </td>
 
-                    {/* Tags / Notes Column */}
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
-                        {hasNotes && (
-                          <StickyNote className="h-3 w-3 text-muted-foreground/70" />
-                        )}
-                        {journal?.tags?.slice(0, 2).map(tag => (
-                          <Badge key={tag} variant="secondary" className="text-[10px] h-5 px-1 font-normal bg-secondary/50">
-                            {tag}
-                          </Badge>
-                        ))}
-                        {journal?.tags && journal.tags.length > 2 && (
-                          <span className="text-[10px] text-muted-foreground">+{journal.tags.length - 2}</span>
-                        )}
-                      </div>
-                    </td>
-
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
                       {formatPrice(trade.entryPrice)}
-                    </td>
-                    <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
-                      {formatPrice(trade.exitPrice)}
                     </td>
                     <td className="px-5 py-3.5 font-mono text-sm text-muted-foreground">
                       {formatQuantity(trade.quantity)}

@@ -93,6 +93,143 @@ export class PnLCalculator {
   }
 
   /**
+   * Get currently open positions
+   */
+  getOpenPositions(): Map<string, Array<{
+    trade: TradeRecord;
+    remainingQty: number;
+    direction: "long" | "short";
+  }>> {
+    // Re-run calculation to get current state (inefficient but safe)
+    // Ideally we'd store this state, but for now we'll just recompute
+    const openPositions = new Map<string, Array<{
+      trade: TradeRecord;
+      remainingQty: number;
+      direction: "long" | "short";
+    }>>();
+
+    for (const trade of this.trades) {
+      if (trade.discriminator !== 19) continue;
+
+      const isLong = trade.side === "long" || trade.side === "buy";
+      const direction = isLong ? "long" : "short";
+      const oppositeDirection = isLong ? "short" : "long";
+
+      if (!openPositions.has(trade.symbol)) {
+        openPositions.set(trade.symbol, []);
+      }
+      const positions = openPositions.get(trade.symbol)!;
+
+      const oppositePositions = positions.filter(
+        (p) => p.direction === oppositeDirection,
+      );
+
+      if (oppositePositions.length > 0) {
+        // Closing existing position(s) - same logic as main calc
+        let remainingExitQty = trade.quantity;
+
+        // Match against queue
+        for (let i = 0; i < positions.length && remainingExitQty > 1e-12; i++) {
+          const position = positions[i];
+          if (position.direction === oppositeDirection) {
+            const matchedQty = Math.min(position.remainingQty, remainingExitQty);
+            position.remainingQty -= matchedQty;
+            remainingExitQty -= matchedQty;
+          }
+        }
+
+        // Remove fully closed
+        const remainingPositions = positions.filter(
+          (p) => p.remainingQty > 1e-12,
+        );
+        openPositions.set(trade.symbol, remainingPositions);
+
+        // If we still have exit quantity (net flip), open new position
+        if (remainingExitQty > 1e-12) {
+          const newPositions = openPositions.get(trade.symbol) || [];
+          newPositions.push({
+            trade: { ...trade, quantity: remainingExitQty }, // adjusted quantity
+            remainingQty: remainingExitQty,
+            direction
+          });
+          openPositions.set(trade.symbol, newPositions);
+        }
+
+      } else {
+        // Opening
+        positions.push({
+          trade,
+          remainingQty: trade.quantity,
+          direction,
+        });
+      }
+    }
+
+    return openPositions;
+  }
+
+  /**
+   * Calculate Unrealized PnL for open positions based on current market prices
+   */
+  calculateUnrealizedPnL(currentPrices: Map<string, number>): {
+    totalUnrealizedPnL: number;
+    positions: Array<{
+      symbol: string;
+      size: number;
+      entryPrice: number;
+      currentPrice: number;
+      pnl: number;
+      direction: "long" | "short";
+    }>;
+  } {
+    const openPositions = this.getOpenPositions();
+    let totalUnrealizedPnL = 0;
+    const positionDetails: Array<{
+      symbol: string;
+      size: number;
+      entryPrice: number;
+      currentPrice: number;
+      pnl: number;
+      direction: "long" | "short";
+    }> = [];
+
+    openPositions.forEach((positions, symbol) => {
+      // Handle symbol mapping (e.g. SOL/USDC -> SOL)
+      const baseSymbol = symbol.split("/")[0];
+      const currentPrice = currentPrices.get(symbol) || currentPrices.get(baseSymbol);
+
+      if (!currentPrice) return;
+
+      positions.forEach(pos => {
+        if (pos.remainingQty <= 1e-12) return;
+
+        let pnl = 0;
+        if (pos.direction === "long") {
+          pnl = (currentPrice - pos.trade.entryPrice) * pos.remainingQty;
+        } else {
+          pnl = (pos.trade.entryPrice - currentPrice) * pos.remainingQty;
+        }
+
+        totalUnrealizedPnL += pnl;
+
+        positionDetails.push({
+          symbol,
+          size: pos.remainingQty,
+          entryPrice: pos.trade.entryPrice,
+          currentPrice,
+          pnl,
+          direction: pos.direction
+        });
+      });
+    });
+
+    return {
+      totalUnrealizedPnL,
+      positions: positionDetails
+    };
+  }
+
+  /**
    * Match an exit trade against open positions using FIFO
    */
   private matchAgainstQueue(

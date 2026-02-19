@@ -167,10 +167,15 @@ async function testAnalyticsFeature() {
 
     // Step 4: Run Analytics
     console.log("\n🔄 Step 3: Running Trade Analytics...");
+
+    // Fetch prices for unrealized PnL
+    console.log("Fetching current market prices...");
+    const currentPrices = await fetcher.fetchCurrentPrices();
+
     const analyticsStart = Date.now();
 
     const calculator = new TradeAnalyticsCalculator(allTrades);
-    const report = calculator.generateFullReport();
+    const report = calculator.generateFullReport(currentPrices);
 
     const analyticsTime = (Date.now() - analyticsStart) / 1000;
     console.log(`✅ Analytics completed in ${analyticsTime.toFixed(2)}s`);
@@ -183,7 +188,14 @@ async function testAnalyticsFeature() {
     console.log("\n📈 SUMMARY STATISTICS:");
     console.log("-".repeat(40));
     console.log(`Total Trades:        ${report.core.totalTrades}`);
-    console.log(`Total PnL:           $${report.core.totalPnL.toFixed(2)}`);
+    console.log(`Total Realized PnL:  $${report.core.realizedPnl.toFixed(2)}`);
+    if (report.core.unrealizedPnl !== 0) {
+      const uColor = report.core.unrealizedPnl >= 0 ? "🟢" : "🔴";
+      console.log(`Unrealized PnL:      ${uColor} $${report.core.unrealizedPnl.toFixed(2)}`);
+      console.log(`Total PnL (Net):     $${(report.core.realizedPnl + report.core.unrealizedPnl).toFixed(2)}`);
+    } else {
+      console.log(`Total PnL:           $${report.core.totalPnL.toFixed(2)}`);
+    }
     console.log(
       `Total Volume:        $${report.core.totalVolume.toFixed(2)}`,
     );

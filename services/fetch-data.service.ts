@@ -469,6 +469,69 @@ export class TransactionDataFetcher {
   }
 
   /**
+   * Fetch current prices using CoinGecko API
+   * Caches results for 1 minute to avoid rate limits
+   */
+  private priceCache: { timestamp: number; prices: Map<string, number> } | null = null;
+
+  async fetchCurrentPrices(): Promise<Map<string, number>> {
+    // Return cached prices if less than 60 seconds old
+    if (
+      this.priceCache &&
+      Date.now() - this.priceCache.timestamp < 60000
+    ) {
+      return this.priceCache.prices;
+    }
+
+    try {
+      console.log("\n🔄 Fetching current prices from CoinGecko...");
+
+      // Ids for: SOL, USDC, BONK, WIF, JUP, RENDER, etc. based on typical Deriverse markets
+      // Adjust these IDs based on actual Coingecko API ids
+      const ids = [
+        "solana",
+        "usd-coin",
+        "bonk",
+        "dogwifhat",
+        "jupiter-exchange-solana",
+        "render-token"
+      ].join(",");
+
+      const response = await fetch(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`
+      );
+
+      if (!response.ok) {
+        throw new Error(`CoinGecko API error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const prices = new Map<string, number>();
+
+      // Normalize keys to match symbol names used in app
+      if (data.solana) prices.set("SOL", data.solana.usd);
+      if (data["usd-coin"]) prices.set("USDC", data["usd-coin"].usd);
+      if (data.bonk) prices.set("BONK", data.bonk.usd);
+      if (data.dogwifhat) prices.set("WIF", data.dogwifhat.usd);
+      if (data["jupiter-exchange-solana"]) prices.set("JUP", data["jupiter-exchange-solana"].usd);
+      if (data["render-token"]) prices.set("RNDR", data["render-token"].usd);
+
+      // Cache the result
+      this.priceCache = {
+        timestamp: Date.now(),
+        prices
+      };
+
+      console.log("✅ Prices updated:", Object.fromEntries(prices));
+      return prices;
+    } catch (error: any) {
+      console.warn(`⚠️ Failed to fetch prices: ${error.message}`);
+      // Return stale cache if available, otherwise empty map
+      return this.priceCache?.prices || new Map<string, number>();
+    }
+  }
+
+  /**
    * Extract financial details from a single transaction
    */
   private async extractTxFinancialDetails(sigInfo: any, tx: any): Promise<{

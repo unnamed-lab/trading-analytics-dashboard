@@ -27,6 +27,7 @@ type AnalyticsSummary = {
   shortVolume: number;
   totalTrades: number;
   netPnL: number;
+  unrealizedPnL: number;
 };
 
 const defaultIcons = {
@@ -66,6 +67,7 @@ export default function KPIRow({
         longVolume: analytics.longShort?.longVolume ?? 0,
         shortVolume: analytics.longShort?.shortVolume ?? 0,
         totalTrades: analytics.core?.totalTrades ?? 0,
+        unrealizedPnL: analytics.core?.unrealizedPnl ?? 0,
       };
     }
 
@@ -106,6 +108,7 @@ export default function KPIRow({
         longVolume: 0, // Can calculate if needed
         shortVolume: 0, // Can calculate if needed
         totalTrades: pnlCalculatedTrades.length,
+        unrealizedPnL: 0,
       };
     }
 
@@ -138,6 +141,7 @@ export default function KPIRow({
         longVolume: 0,
         shortVolume: 0,
         totalTrades: fillTrades.length,
+        unrealizedPnL: 0,
       };
     }
 
@@ -153,6 +157,7 @@ export default function KPIRow({
       longVolume: 0,
       shortVolume: 0,
       totalTrades: 0,
+      unrealizedPnL: 0,
     };
   }, [analytics, pnlCalculatedTrades, rawTrades]);
 
@@ -202,18 +207,20 @@ export default function KPIRow({
       ? (finalMetrics.shortTrades / totalDirectionalTrades) * 100
       : 50;
 
+  const totalWithUnrealized = finalMetrics.netPnL + finalMetrics.unrealizedPnL;
+
   const kpis = [
     {
-      label: "NET PNL",
-      value: `${finalMetrics.netPnL >= 0 ? "+" : "-"}$${Math.abs(
-        finalMetrics.netPnL,
+      label: "TOTAL PNL",
+      value: `${totalWithUnrealized >= 0 ? "+" : "-"}$${Math.abs(
+        totalWithUnrealized,
       ).toLocaleString(undefined, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })}`,
-      sub: `${finalMetrics.totalTrades} Trades`,
+      sub: `Real: $${finalMetrics.netPnL.toFixed(0)} | Unr: $${finalMetrics.unrealizedPnL.toFixed(0)}`,
       icon: defaultIcons.total,
-      positive: finalMetrics.netPnL >= 0,
+      positive: totalWithUnrealized >= 0,
     },
     {
       label: "WIN RATE",

@@ -17,10 +17,13 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
 
   const portfolioData = useMemo(() => {
     // Get total PnL from analytics or calculate
-    const totalPnL =
+    const realizedPnL =
       analytics?.core?.netPnL ??
       pnlTrades?.reduce((sum, t) => sum + (t.pnl || 0), 0) ??
       0;
+
+    const unrealizedPnL = analytics?.core?.unrealizedPnl ?? 0;
+    const totalPnL = realizedPnL + unrealizedPnL;
 
     // Get today's PnL
     const today = new Date().toDateString();
@@ -60,6 +63,7 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
         : 0;
 
     // Calculate account value (assuming initial balance + Net PnL + Net Deposits)
+    // Note: Use totalPnL (Realized + Unrealized) for account value
     const netDeposits = analytics?.core?.netDeposits ?? 0;
     const accountValue = Math.max(0, initialBalance + totalPnL + netDeposits);
 
@@ -86,6 +90,7 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
       yesterdayPnL,
       isProfitableToday: todayPnL > 0,
       isProfitableOverall: totalPnL > 0,
+      unrealizedPnL,
     };
   }, [analytics, pnlTrades, initialBalance]);
 
@@ -143,6 +148,11 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
               <span className="ml-1">
                 ({portfolioData.isProfitableOverall ? "+" : "-"}
                 {Math.abs(portfolioData.pnlPercentage).toFixed(2)}%)
+              </span>
+            )}
+            {portfolioData.unrealizedPnL !== 0 && (
+              <span className="ml-2 text-[10px] text-muted-foreground font-normal">
+                (Unr: {portfolioData.unrealizedPnL > 0 ? "+" : ""}{portfolioData.unrealizedPnL.toFixed(2)})
               </span>
             )}
           </span>

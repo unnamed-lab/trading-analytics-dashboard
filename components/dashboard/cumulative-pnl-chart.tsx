@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useMemo } from "react";
 import { useTradeAnalytics, useCalculatedPnL } from "@/hooks/use-trade-queries";
 import {
@@ -16,6 +18,8 @@ import {
   DashboardCardSkeleton,
   DashboardError,
 } from "@/components/ui/dashboard-states";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface ChartDataPoint {
   date: string;
@@ -117,61 +121,48 @@ const CumulativePnLChart = () => {
   // Show loading or empty state
   if (chartData.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-sm text-foreground">
-            Cumulative PnL
-          </h3>
-          <div className="flex rounded border border-border overflow-hidden">
-            <button className="px-3 py-1 text-xs font-medium bg-secondary text-foreground">
-              Line
-            </button>
-            <button className="px-3 py-1 text-xs font-medium text-muted-foreground">
-              Bar
-            </button>
-          </div>
-        </div>
-        <div className="h-72 flex items-center justify-center text-muted-foreground">
-          No PnL data available
-        </div>
-      </div>
+      <Card className="min-h-[400px] flex items-center justify-center border-border/50 bg-card/50 backdrop-blur-sm">
+        <div className="text-muted-foreground">No PnL data available</div>
+      </Card>
     );
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm text-foreground">
-          Cumulative PnL
-        </h3>
-        <div className="flex rounded border border-border overflow-hidden">
+    <Card className="border-border/50 bg-card/50 backdrop-blur-sm flex flex-col min-h-[400px]">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-medium text-foreground">Cumulative PnL</CardTitle>
+        <div className="bg-secondary/50 p-1 rounded-lg flex gap-1">
           <button
             onClick={() => setMode("line")}
-            className={`px-3 py-1 text-xs font-medium transition-colors ${mode === "line"
-              ? "bg-secondary text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-              }`}
+            className={cn(
+              "px-3 py-1 text-xs font-medium rounded-md transition-all",
+              mode === "line"
+                ? "bg-background shadow-sm text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+            )}
           >
             Line
           </button>
           <button
             onClick={() => setMode("bar")}
-            className={`px-3 py-1 text-xs font-medium transition-colors ${mode === "bar"
-              ? "bg-secondary text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-              }`}
+            className={cn(
+              "px-3 py-1 text-xs font-medium rounded-md transition-all",
+              mode === "bar"
+                ? "bg-background shadow-sm text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+            )}
           >
             Bar
           </button>
         </div>
-      </div>
+      </CardHeader>
 
-      <div className="h-72">
-        <ResponsiveContainer width="100%" height="100%">
+      <CardContent className="flex-1 min-h-[300px]">
+        <ResponsiveContainer width="100%" height="100%" minHeight={300}>
           {mode === "line" ? (
             <AreaChart
               data={chartData}
-              margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
+              margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
             >
               <defs>
                 <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
@@ -197,32 +188,42 @@ const CumulativePnLChart = () => {
               </defs>
               <CartesianGrid
                 strokeDasharray="3 3"
-                stroke="hsl(222, 25%, 16%)"
+                vertical={false}
+                stroke="hsl(var(--border))"
+                opacity={0.4}
               />
               <XAxis
                 dataKey="date"
-                tick={{ fill: "hsl(215, 15%, 50%)", fontSize: 11 }}
+                tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
                 interval="preserveStartEnd"
+                dy={10}
               />
               <YAxis
-                tick={{ fill: "hsl(215, 15%, 50%)", fontSize: 11 }}
+                tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
                 tickFormatter={(v) => `$${v.toLocaleString()}`}
+                width={60}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: "hsl(222, 40%, 8%)",
-                  border: "1px solid hsl(222, 25%, 16%)",
-                  borderRadius: 4,
-                  color: "hsl(210, 20%, 90%)",
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 12,
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="bg-popover/95 border border-border rounded-xl p-3 shadow-xl backdrop-blur-md text-xs">
+                        <p className="font-semibold mb-2 text-popover-foreground">{label}</p>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-muted-foreground">Cumulative PnL</span>
+                          <span className={`font-mono font-medium ${Number(payload[0].value) >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                            ${Number(payload[0].value).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
                 }}
-                formatter={(value: number) => [`$${value.toFixed(2)}`, "PnL"]}
-                labelFormatter={(label) => `Date: ${label}`}
               />
               <Area
                 type="monotone"
@@ -234,95 +235,94 @@ const CumulativePnLChart = () => {
                 }
                 strokeWidth={2}
                 fill="url(#pnlGradient)"
-                dot={{
-                  fill:
-                    chartData[chartData.length - 1]?.pnl >= 0
-                      ? "#10b981"
-                      : "#ef4444",
-                  r: 3,
-                }}
+                animationDuration={1500}
               />
             </AreaChart>
           ) : (
             <BarChart
               data={barData}
-              margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
+              margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
             >
               <CartesianGrid
                 strokeDasharray="3 3"
-                stroke="hsl(222, 25%, 16%)"
+                vertical={false}
+                stroke="hsl(var(--border))"
+                opacity={0.4}
               />
               <XAxis
                 dataKey="date"
-                tick={{ fill: "hsl(215, 15%, 50%)", fontSize: 11 }}
+                tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
+                dy={10}
               />
               <YAxis
-                tick={{ fill: "hsl(215, 15%, 50%)", fontSize: 11 }}
+                tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
                 tickFormatter={(v) => `$${v.toLocaleString()}`}
+                width={60}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: "hsl(222, 40%, 8%)",
-                  border: "1px solid hsl(222, 25%, 16%)",
-                  borderRadius: 4,
-                  color: "hsl(210, 20%, 90%)",
-                  fontFamily: "JetBrains Mono",
-                  fontSize: 12,
+                cursor={{ fill: '#475569' }}
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="bg-popover/95 border border-border rounded-xl p-3 shadow-xl backdrop-blur-md text-xs">
+                        <p className="font-semibold mb-2 text-popover-foreground">{label}</p>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-muted-foreground">Daily PnL</span>
+                          <span className={`font-mono font-medium ${Number(payload[0].value) >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                            ${Number(payload[0].value).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
                 }}
-                formatter={(value: number) => [
-                  `$${value.toFixed(2)}`,
-                  "Daily PnL",
-                ]}
-                labelFormatter={(label) => `Date: ${label}`}
               />
               <Bar
                 dataKey="daily"
-                fill="hsl(187, 100%, 50%)"
-                radius={[2, 2, 0, 0]}
+                radius={[4, 4, 0, 0]}
+                animationDuration={1500}
               >
                 {barData.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
                     fill={entry.daily >= 0 ? "#10b981" : "#ef4444"}
+                    fillOpacity={0.8}
                   />
                 ))}
               </Bar>
             </BarChart>
           )}
         </ResponsiveContainer>
-      </div>
+      </CardContent>
 
-      {/* Summary stats */}
-      <div className="flex justify-between text-xs text-muted-foreground border-t border-border pt-3">
-        <div>
-          <span className="block">Total PnL</span>
-          <span
-            className={`font-mono text-sm font-bold ${chartData[chartData.length - 1]?.pnl >= 0
-              ? "text-profit"
-              : "text-loss"
-              }`}
-          >
-            ${chartData[chartData.length - 1]?.pnl.toFixed(2)}
-          </span>
-        </div>
-        <div className="text-right">
-          <span className="block">Best Day</span>
-          <span className="font-mono text-sm font-bold text-profit">
-            +${Math.max(...barData.map((d) => d.daily)).toFixed(2)}
-          </span>
-        </div>
-        <div className="text-right">
-          <span className="block">Worst Day</span>
-          <span className="font-mono text-sm font-bold text-loss">
-            ${Math.min(...barData.map((d) => d.daily)).toFixed(2)}
-          </span>
+      <div className="flex border-t border-border/50 p-4 bg-muted/20">
+        <div className="flex items-center gap-6 text-sm">
+          <div>
+            <span className="text-xs text-muted-foreground block">Total PnL</span>
+            <span className={`font-mono font-bold ${chartData[chartData.length - 1]?.pnl >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+              ${chartData[chartData.length - 1]?.pnl.toFixed(2)}
+            </span>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground block">Best Day</span>
+            <span className="font-mono font-bold text-emerald-500">
+              +${Math.max(...barData.map((d) => d.daily), 0).toFixed(2)}
+            </span>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground block">Worst Day</span>
+            <span className="font-mono font-bold text-rose-500">
+              ${Math.min(...barData.map((d) => d.daily), 0).toFixed(2)}
+            </span>
+          </div>
         </div>
       </div>
-    </div>
+    </Card>
   );
 };
 

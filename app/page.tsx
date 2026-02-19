@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-
 import FilterBar from "@/components/dashboard/filter-bar";
 import FeesBreakdown from "@/components/dashboard/fees-breakdown";
 import TradeHistory from "@/components/dashboard/trade-history";
@@ -14,14 +13,15 @@ import { FeeWaterfall } from "@/components/dashboard/fee-waterfall";
 import { MomentumGauge } from "@/components/dashboard/momentum-gauge";
 import { AICoach } from "@/components/dashboard/ai-coach";
 import { LoadingTerminal } from "@/components/ui/loading-terminal";
-import { ErrorBanner } from "@/components/ui/error-banner"; // Add import
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
 import { TradeFilters } from "@/types";
+import { useAllTrades } from "@/hooks/use-trade-queries";
 
 export default function HomePage() {
-  const { connected } = useWallet();
-  const [showLoading, setShowLoading] = useState(true);
-  const [animationComplete, setAnimationComplete] = useState(false);
+  const { connected, publicKey } = useWallet();
+  const [showTerminal, setShowTerminal] = useState(true);
 
   // Filters state
   const [filters, setFilters] = useState<TradeFilters>({
@@ -29,32 +29,28 @@ export default function HomePage() {
   });
 
   // Fetch data to determine loading state
-  // We use useTradeAnalytics as a proxy for "all data" since it depends on trades & financials
-  const { isLoading, isFetching, isError, error } = useTradeAnalytics(filters);
+  const { data: analytics, isLoading, isFetching, isError, error } = useTradeAnalytics(filters);
+  const {
+    data: realTrades = [],
+    isLoading: realLoading,
+  } = useAllTrades({
+    enabled: connected && !!publicKey,
+    excludeFees: true,
+    filters,
+  });
 
-  // Handle loading animation logic
+
+  // Initial loading terminal logic
   useEffect(() => {
-    // Only show loading terminal if:
-    // 1. Wallet is connected
-    // 2. We haven't completed the animation yet
-    // 3. Data is actually loading (initial fetch)
-    if (connected && isLoading && !animationComplete) {
-      setShowLoading(true);
-    } else if (!isLoading && animationComplete) {
-      // Data is ready and animation is done -> hide loading
-      setShowLoading(false);
-    } else if (!connected) {
-      // If wallet disconnects, reset state? 
-      // Or just let WalletOverlay take over (which it does via z-index/conditional)
-      setShowLoading(false);
+    // Hide terminal once initial loading is done or if not connected
+    if (!isLoading && !realLoading && showTerminal) {
+      // Add a small delay for smooth transition
+      const timer = setTimeout(() => setShowTerminal(false), 800);
+      return () => clearTimeout(timer);
     }
-  }, [connected, isLoading, animationComplete]);
+  }, [isLoading, showTerminal, realLoading]);
 
-  const handleAnimationComplete = () => {
-    setAnimationComplete(true);
-    setShowLoading(false);
-  };
-
+  // Handle period changes
   const handlePeriodChange = (period: string) => {
     setFilters((prev) => ({ ...prev, period }));
   };
@@ -63,18 +59,31 @@ export default function HomePage() {
     setFilters((prev) => ({ ...prev, ...newFilters }));
   };
 
-  return (
-    <div className="min-h-screen bg-background/50 pb-20 relative">
+  // 1. Not connected state (handled by AppShell overlay mostly, but we can show skeleton behind)
+  if (!connected) {
+    return <DashboardSkeleton />;
+  }
 
-      {/* 0. Global States */}
-      {/* WalletOverlay handled in AppShell */}
+  // 2. Initial Terminal Loading
+  if (showTerminal && isLoading || realLoading) {
+    return <LoadingTerminal onComplete={() => setShowTerminal(false)} />;
+  }
+
+  // 3. Skeleton Loading (when fetching new data or filtering)
+  // We show skeleton if we are loading AND don't have data yet (initial fetch)
+  // OR if we are explicitly fetching and want to show a loading state (optional, but requested by user)
+  // The user asked: "when data is not present and is Fetching or Pending"
+  const shouldShowSkeleton = (isLoading || isFetching || realLoading) && !analytics && !realTrades;
+
+  if (shouldShowSkeleton) {
+    return <DashboardSkeleton />;
+  }
+
+  return (
+    <div className="min-h-screen bg-background/50 pb-20 relative animate-in fade-in duration-500">
 
       {isError && (
         <ErrorBanner message={error?.message || "Failed to load trade data. Please try refreshing."} />
-      )}
-
-      {showLoading && connected && (
-        <LoadingTerminal onComplete={handleAnimationComplete} />
       )}
 
       {/* 1. The Command Center (Fixed Top) */}
@@ -122,8 +131,8 @@ export default function HomePage() {
       {/* Hidden Filter Bar state management for compatibility with TradeHistory for now */}
       <div className="hidden">
         <FilterBar
-          activePeriod={filters.period || "7D"}
           setActivePeriod={(p) => handlePeriodChange(p)}
+          activePeriod={filters.period || "7D"}
         />
       </div>
     </div>

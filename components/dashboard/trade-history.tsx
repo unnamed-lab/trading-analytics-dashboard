@@ -1,4 +1,3 @@
-// components/dashboard/trade-history.tsx
 "use client";
 
 import { useState, useMemo } from "react";
@@ -8,11 +7,8 @@ import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl, formatQuantity } from "@/types";
 import TradeReviewPanel from "./trade-review-panel";
 import Link from "next/link";
-import { Loader2, StickyNote } from "lucide-react";
 import { TableSkeleton } from "@/components/ui/loading-skeleton";
-import { Badge } from "@/components/ui/badge";
 import { RiskMirrors } from "@/components/dashboard/risk-mirrors";
-
 import { TradeFilters } from "@/types";
 import { DashboardError } from "@/components/ui/dashboard-states";
 import { useJournals } from "@/hooks/use-journals";

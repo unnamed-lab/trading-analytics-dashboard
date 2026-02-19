@@ -15,6 +15,7 @@ import {
   useAllTrades,
 } from "@/hooks/use-trade-queries";
 import { useMemo } from "react";
+import { cn } from "@/lib/utils";
 
 type AnalyticsSummary = {
   totalPnl: number;
@@ -266,60 +267,71 @@ export default function KPIRow({
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-      {kpis.map((kpi) => (
+      {kpis.map((kpi, index) => (
         <div
           key={kpi.label}
-          className="rounded-lg border border-border bg-card p-4 flex flex-col gap-2"
+          className="glass-card rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden group hover:bg-white/[0.04] transition-all duration-300"
         >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+          {/* Subtle background gradient based on index */}
+          <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent opacity-50" />
+
+          <div className="flex items-center justify-between relative z-10">
+            <span className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">
               {kpi.label}
             </span>
-            <kpi.icon className="h-4 w-4 text-primary" />
+            <div className={cn("p-1.5 rounded-lg bg-white/[0.05]", kpi.positive ? "text-emerald-400" : kpi.negative ? "text-rose-400" : "text-electric")}>
+              <kpi.icon className="h-3.5 w-3.5" />
+            </div>
           </div>
-          <span
-            className={`font-mono text-xl sm:text-2xl font-bold ${kpi.positive
-              ? "text-profit"
-              : kpi.negative
-                ? "text-loss"
-                : "text-foreground"
-              }`}
-          >
-            {kpi.value}
-          </span>
-          {kpi.sub && (
+
+          <div className="relative z-10">
             <span
-              className={`text-xs ${kpi.positive ? "text-profit" : "text-muted-foreground"
-                }`}
+              className={cn(
+                "font-mono text-xl sm:text-2xl font-bold tracking-tight block mb-1",
+                kpi.positive
+                  ? "text-emerald-400 text-glow-green"
+                  : kpi.negative
+                    ? "text-rose-400 text-glow-red"
+                    : "text-white"
+              )}
             >
-              {kpi.sub}
+              {kpi.value}
             </span>
-          )}
+
+            {kpi.sub && (
+              <span className="text-[11px] font-medium text-slate-500 block truncate">
+                {kpi.sub}
+              </span>
+            )}
+          </div>
+
+          {/* Progress / Ratio Bars */}
           {kpi.progress !== undefined && (
-            <div className="mt-1">
-              <div className="h-1 w-full rounded-full bg-secondary">
+            <div className="mt-auto relative z-10 pt-1">
+              <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-primary"
+                  className={cn("h-full rounded-full transition-all duration-500", kpi.positive ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : "bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]")}
                   style={{ width: `${kpi.progress}%` }}
                 />
               </div>
             </div>
           )}
+
           {kpi.ratio && (
-            <div className="mt-1">
-              <div className="flex h-1 w-full rounded-full overflow-hidden">
+            <div className="mt-auto relative z-10 pt-1">
+              <div className="flex h-1.5 w-full rounded-full overflow-hidden">
                 <div
-                  className="bg-profit"
+                  className="bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)] z-10"
                   style={{ width: `${kpi.ratio.long}%` }}
                 />
                 <div
-                  className="bg-loss"
+                  className="bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)] z-10"
                   style={{ width: `${kpi.ratio.short}%` }}
                 />
               </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
-                <span>Long {kpi.ratio.long.toFixed(0)}%</span>
-                <span>Short {kpi.ratio.short.toFixed(0)}%</span>
+              <div className="flex justify-between text-[10px] items-center mt-1.5 font-medium">
+                <span className="text-emerald-500">Long {kpi.ratio.long.toFixed(0)}%</span>
+                <span className="text-rose-500">Short {kpi.ratio.short.toFixed(0)}%</span>
               </div>
             </div>
           )}

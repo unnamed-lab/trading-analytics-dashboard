@@ -52,24 +52,37 @@ export function FeeWaterfall({ filters }: { filters?: TradeFilters }) {
             <CardContent className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data}>
-                        <XAxis dataKey="name" fontSize={12} />
-                        <YAxis tickFormatter={(val) => `$${val}`} fontSize={12} />
+                        <XAxis
+                            dataKey="name"
+                            fontSize={12}
+                            tick={{ fill: "#94a3b8" }}
+                            axisLine={false}
+                            tickLine={false}
+                            dy={5}
+                        />
+                        <YAxis
+                            tickFormatter={(val) => `$${val}`}
+                            fontSize={12}
+                            tick={{ fill: "#94a3b8" }}
+                            axisLine={false}
+                            tickLine={false}
+                        />
                         <Tooltip
                             cursor={{ fill: 'transparent' }}
                             content={({ active, payload }) => {
                                 if (active && payload && payload.length) {
                                     const d = payload[0].payload;
                                     return (
-                                        <div className="bg-background border rounded-lg p-2 shadow-lg text-xs">
-                                            <p className="font-bold mb-1">{d.name}</p>
-                                            <p className="font-mono">${d.value.toFixed(2)}</p>
+                                        <div className="bg-popover/95 border border-border rounded-xl p-3 shadow-xl backdrop-blur-md text-xs">
+                                            <p className="font-bold mb-1 text-popover-foreground">{d.name}</p>
+                                            <p className="font-mono text-emerald-400">${d.value.toFixed(2)}</p>
                                         </div>
                                     );
                                 }
                                 return null;
                             }}
                         />
-                        <ReferenceLine y={0} stroke="#666" />
+                        <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
                         <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                             {data.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.fill} />

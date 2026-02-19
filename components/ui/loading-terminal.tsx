@@ -54,7 +54,7 @@ export function LoadingTerminal({ onComplete }: { onComplete?: () => void }) {
         // Cleanup
         const completeTimeout = setTimeout(() => {
             if (onComplete) onComplete();
-        }, BOOT_SEQUENCE[BOOT_SEQUENCE.length - 1].delay + 800);
+        }, BOOT_SEQUENCE[BOOT_SEQUENCE.length - 1].delay + 1500);
         timeouts.push(completeTimeout);
 
         return () => timeouts.forEach(clearTimeout);
@@ -77,7 +77,7 @@ export function LoadingTerminal({ onComplete }: { onComplete?: () => void }) {
                     <h2 className="text-xl font-bold tracking-widest text-primary drop-shadow-[0_0_8px_rgba(var(--primary),0.5)]">
                         SYSTEM BOOT
                     </h2>
-                    <span className="text-xs animate-pulse text-muted-foreground">v2.4.0-alpha</span>
+                    <span className="text-xs animate-pulse text-muted-foreground">v1.1.0-alpha</span>
                 </div>
 
                 <div
@@ -85,7 +85,7 @@ export function LoadingTerminal({ onComplete }: { onComplete?: () => void }) {
                     className="h-64 overflow-y-auto space-y-2 mb-6 font-mono text-sm relative z-10 scrollbar-hide"
                 >
                     {lines.map((line) => (
-                        <div key={line.id} className="flex items-center gap-3 animate-in fade-in slide-in-from-left-2 duration-300">
+                        <div key={line.id} className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
                             <span className="text-muted-foreground/50">[{new Date().toLocaleTimeString()}]</span>
                             <span className={cn(
                                 "flex-1",
@@ -102,7 +102,7 @@ export function LoadingTerminal({ onComplete }: { onComplete?: () => void }) {
                             )} />
                         </div>
                     ))}
-                    <div className="h-4 w-3 bg-primary animate-pulse inline-block ml-1" />
+                    <div className="h-4 w-3 bg-primary animate-pulse inline-block mr-3" />
                 </div>
 
                 <div className="relative z-10">

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { BrainCircuit, TrendingUp, AlertTriangle, Target } from "lucide-react";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { cn } from "@/lib/utils";
 
 export function AICoach() {
     const { data: analytics } = useTradeAnalytics();
@@ -85,9 +86,9 @@ export function AICoach() {
             <SheetTrigger asChild>
                 <Button
                     variant="outline"
-                    className="fixed bottom-6 right-6 h-12 w-12 rounded-full shadow-lg bg-background border-border hover:bg-accent hover:text-accent-foreground z-50 transition-all duration-300 group"
+                    className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-[0_0_20px_rgba(14,165,233,0.3)] bg-gradient-to-br from-electric to-blue-600 border-none hover:scale-105 active:scale-95 z-50 transition-all duration-300 group"
                 >
-                    <BrainCircuit className="h-6 w-6 text-foreground group-hover:text-primary transition-colors" />
+                    <BrainCircuit className="h-6 w-6 text-white animate-pulse" />
                 </Button>
             </SheetTrigger>
             <SheetContent className="w-[400px] sm:w-[540px] flex flex-col border-l border-border">
@@ -115,20 +116,24 @@ export function AICoach() {
                             ) : (
                                 <div className="space-y-3">
                                     {insights.map((insight) => (
-                                        <Card key={insight.id} className="bg-card/50 border-border/50 shadow-sm hover:bg-card/80 transition-colors">
+                                        <Card key={insight.id} className="glass-card border-white/[0.05] hover:bg-white/[0.04] transition-all duration-300">
                                             <CardContent className="p-4">
                                                 <div className="flex items-start gap-4">
-                                                    <div className="mt-0.5 p-2 bg-background/50 rounded-lg border border-border/50">
+                                                    <div className={cn("mt-0.5 p-2 rounded-lg border border-white/[0.05]",
+                                                        insight.type === 'success' ? "bg-emerald-500/10" :
+                                                            insight.type === 'danger' ? "bg-rose-500/10" :
+                                                                insight.type === 'warning' ? "bg-amber-500/10" : "bg-electric/10"
+                                                    )}>
                                                         {insight.icon}
                                                     </div>
                                                     <div className="flex-1 space-y-1">
                                                         <div className="flex justify-between items-start">
                                                             <h4 className="font-medium text-sm text-foreground">{insight.title}</h4>
-                                                            <Badge variant="outline" className="text-[10px] h-5 px-1.5 font-normal text-muted-foreground">
+                                                            <Badge variant="outline" className="text-[10px] h-5 px-1.5 font-normal text-muted-foreground border-white/[0.1]">
                                                                 {insight.time}
                                                             </Badge>
                                                         </div>
-                                                        <p className="text-sm text-muted-foreground leading-relaxed">
+                                                        <p className="text-sm text-slate-400 leading-relaxed">
                                                             {insight.message}
                                                         </p>
                                                     </div>

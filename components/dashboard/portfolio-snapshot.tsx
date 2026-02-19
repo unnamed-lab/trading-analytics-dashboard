@@ -1,9 +1,13 @@
+"use client";
+
 import { useMemo } from "react";
 import { useTradeAnalytics, useCalculatedPnL } from "@/hooks/use-trade-queries";
 import {
   DashboardCardSkeleton,
   DashboardError,
 } from "@/components/ui/dashboard-states";
+import { Card, CardContent } from "@/components/ui/card";
+import { ArrowUpRight, ArrowDownRight, Wallet, Activity, TrendingUp, TrendingDown } from "lucide-react";
 
 interface PortfolioSnapshotProps {
   initialBalance?: number; // Starting balance if known
@@ -33,7 +37,6 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
         .reduce((sum, t) => sum + (t.pnl || 0), 0) ?? 0;
 
     // Get yesterday's PnL for comparison
-    // eslint-disable-next-line react-hooks/purity
     const yesterday = new Date(Date.now() - 86400000).toDateString();
     const yesterdayPnL =
       pnlTrades
@@ -63,7 +66,6 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
         : 0;
 
     // Calculate account value (assuming initial balance + Net PnL + Net Deposits)
-    // Note: Use totalPnL (Realized + Unrealized) for account value
     const netDeposits = analytics?.core?.netDeposits ?? 0;
     const accountValue = Math.max(0, initialBalance + totalPnL + netDeposits);
 
@@ -79,6 +81,9 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
     const todayPnlPercentage =
       accountValue > 0 ? (todayPnL / accountValue) * 100 : 0;
 
+    const bestTrade = Math.max(...(pnlTrades?.map((t) => t.pnl || 0) || [0]));
+    const worstTrade = Math.min(...(pnlTrades?.map((t) => t.pnl || 0) || [0]));
+
     return {
       accountValue,
       todayPnL,
@@ -91,6 +96,8 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
       isProfitableToday: todayPnL > 0,
       isProfitableOverall: totalPnL > 0,
       unrealizedPnL,
+      bestTrade,
+      worstTrade
     };
   }, [analytics, pnlTrades, initialBalance]);
 
@@ -108,142 +115,113 @@ const PortfolioSnapshot = ({ initialBalance = 0 }: PortfolioSnapshotProps) => {
 
   if (!pnlTrades?.length && !analytics) {
     return (
-      <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-4 h-full">
-        <span className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
-          Portfolio Snapshot
-        </span>
-        <div className="flex items-center justify-center h-full text-muted-foreground">
-          No portfolio data available
-        </div>
-      </div>
+      <Card className="h-full flex items-center justify-center p-6 border-border/50 bg-card/50 backdrop-blur-sm">
+        <div className="text-muted-foreground text-sm">No portfolio data available</div>
+      </Card>
     );
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-4 h-full">
-      <span className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
-        Portfolio Snapshot
-      </span>
+    <Card className="h-full border-border/50 bg-card/50 backdrop-blur-sm overflow-hidden flex flex-col">
+      <CardContent className="p-6 flex flex-col gap-6 h-full justify-between">
 
-      <div>
-        <span className="text-xs text-muted-foreground">
-          Total Account Value
-        </span>
-        <p className="font-mono text-3xl font-bold text-foreground">
-          $
-          {portfolioData.accountValue.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </p>
-        <div className="flex items-center gap-2 mt-1">
-          <span className="text-xs text-muted-foreground">Total PnL:</span>
-          <span
-            className={`text-xs font-mono font-bold ${portfolioData.isProfitableOverall ? "text-profit" : "text-loss"
-              }`}
-          >
-            {portfolioData.isProfitableOverall ? "+" : "-"}$
-            {Math.abs(portfolioData.totalPnL).toFixed(2)}
-            {portfolioData.pnlPercentage !== 0 && (
-              <span className="ml-1">
-                ({portfolioData.isProfitableOverall ? "+" : "-"}
-                {Math.abs(portfolioData.pnlPercentage).toFixed(2)}%)
-              </span>
-            )}
-            {portfolioData.unrealizedPnL !== 0 && (
-              <span className="ml-2 text-[10px] text-muted-foreground font-normal">
-                (Unr: {portfolioData.unrealizedPnL > 0 ? "+" : ""}{portfolioData.unrealizedPnL.toFixed(2)})
-              </span>
-            )}
+        {/* Header / Account Value */}
+        <div className="relative">
+          <div className="absolute right-0 top-0 p-2 bg-secondary/30 rounded-full">
+            <Wallet className="w-5 h-5 text-muted-foreground" />
+          </div>
+          <span className="text-xs font-medium tracking-wider text-muted-foreground uppercase flex items-center gap-2">
+            Portfolio Balance
           </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <span className="text-xs text-muted-foreground">{"Today's PnL"}</span>
-          <div className="flex flex-col">
-            <span
-              className={`font-mono text-xl font-bold ${portfolioData.isProfitableToday ? "text-profit" : "text-loss"
-                }`}
-            >
-              {portfolioData.isProfitableToday ? "+" : "-"}$
-              {Math.abs(portfolioData.todayPnL).toFixed(2)}
+          <div className="mt-1">
+            <span className="text-4xl font-mono font-bold tracking-tighter text-foreground">
+              ${portfolioData.accountValue.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </span>
-            <span
-              className={`text-xs ${portfolioData.todayPnL !== 0
-                ? portfolioData.isProfitableToday
-                  ? "text-profit"
-                  : "text-loss"
-                : "text-muted-foreground"
-                }`}
-            >
-              {portfolioData.todayPnL !== 0
-                ? portfolioData.isProfitableToday
-                  ? "+"
-                  : "-"
-                : ""}
-              {Math.abs(portfolioData.todayPnlPercentage).toFixed(2)}%
-              {portfolioData.yesterdayPnL !== 0 && (
-                <span className="text-muted-foreground ml-1">
-                  vs {portfolioData.yesterdayPnL > 0 ? "+" : "-"}$
-                  {Math.abs(portfolioData.yesterdayPnL).toFixed(2)} yesterday
-                </span>
-              )}
+          </div>
+
+          <div className="flex items-center gap-3 mt-2">
+            <div className={`flex items-center gap-1 text-sm font-medium px-2 py-0.5 rounded-md ${portfolioData.isProfitableOverall ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"}`}>
+              {portfolioData.isProfitableOverall ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+              <span>
+                {portfolioData.isProfitableOverall ? "+" : "-"}${Math.abs(portfolioData.totalPnL).toFixed(2)}
+              </span>
+            </div>
+            <span className={`text-xs ${portfolioData.pnlPercentage >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+              ({portfolioData.pnlPercentage >= 0 ? "+" : ""}{portfolioData.pnlPercentage.toFixed(2)}%)
             </span>
           </div>
         </div>
 
-        <div>
-          <span className="text-xs text-muted-foreground">Total Fees</span>
-          <p className="font-mono text-xl font-bold text-loss">
-            ${portfolioData.totalFees.toFixed(4)}
-          </p>
-          <span className="text-xs text-muted-foreground">Paid in fees</span>
-        </div>
-      </div>
+        {/* Key Metrics Grid */}
+        <div className="grid grid-cols-2 gap-4">
+          {/* Today's Data */}
+          <div className="bg-background/40 rounded-xl p-3 border border-border/50 hover:border-border transition-colors">
+            <div className="flex items-center gap-2 mb-1">
+              <Activity className="w-3 h-3 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Today&apos;s PnL</span>
+            </div>
+            <div className={`font-mono text-lg font-bold ${portfolioData.isProfitableToday ? "text-emerald-500" : "text-rose-500"}`}>
+              {portfolioData.isProfitableToday ? "+" : "-"}${Math.abs(portfolioData.todayPnL).toFixed(2)}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              vs ${Math.abs(portfolioData.yesterdayPnL).toFixed(0)} yest.
+            </div>
+          </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs text-muted-foreground">
-            Est. Margin Usage
-          </span>
-          <span className="font-mono text-xs text-foreground">
-            {portfolioData.marginUsage.toFixed(1)}%
-          </span>
+          {/* Unr. PnL */}
+          <div className="bg-background/40 rounded-xl p-3 border border-border/50 hover:border-border transition-colors">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs text-muted-foreground">Unrealized PnL</span>
+            </div>
+            <div className={`font-mono text-lg font-bold ${portfolioData.unrealizedPnL >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+              {portfolioData.unrealizedPnL >= 0 ? "+" : ""}${portfolioData.unrealizedPnL.toFixed(2)}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              Open Positions
+            </div>
+          </div>
         </div>
-        <div className="h-1.5 w-full rounded-full bg-secondary">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-300"
-            style={{ width: `${portfolioData.marginUsage}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
-          <span>Conservative</span>
-          <span>Aggressive</span>
-        </div>
-      </div>
 
-      {/* Quick stats */}
-      <div className="grid grid-cols-2 gap-2 text-xs border-t border-border pt-3">
-        <div>
-          <span className="text-muted-foreground">Best Trade</span>
-          <p className="font-mono text-profit font-bold">
-            +$
-            {Math.max(...(pnlTrades?.map((t) => t.pnl || 0) || [0])).toFixed(2)}
-          </p>
+        {/* Margin Usage */}
+        <div className="space-y-2">
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">Est. Margin Usage</span>
+            <span className={`font-mono ${portfolioData.marginUsage > 80 ? "text-rose-500" : "text-foreground"}`}>
+              {portfolioData.marginUsage.toFixed(1)}%
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-secondary/50 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${portfolioData.marginUsage > 80 ? 'bg-rose-500' :
+                  portfolioData.marginUsage > 50 ? 'bg-orange-500' : 'bg-emerald-500'
+                }`}
+              style={{ width: `${portfolioData.marginUsage}%` }}
+            />
+          </div>
         </div>
-        <div>
-          <span className="text-muted-foreground">Worst Trade</span>
-          <p className="font-mono text-loss font-bold">
-            -$
-            {Math.abs(
-              Math.min(...(pnlTrades?.map((t) => t.pnl || 0) || [0])),
-            ).toFixed(2)}
-          </p>
+
+        {/* Footer Stats */}
+        <div className="grid grid-cols-2 gap-2 pt-4 border-t border-border/40">
+          <div className="flex flex-col">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Best Trade</span>
+            <span className="font-mono text-sm text-emerald-500 font-bold flex items-center gap-1">
+              <ArrowUpRight className="w-3 h-3" />
+              +${portfolioData.bestTrade.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex flex-col text-right">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Total Fees</span>
+            <span className="font-mono text-sm text-rose-500 font-bold">
+              -${portfolioData.totalFees.toFixed(2)}
+            </span>
+          </div>
         </div>
-      </div>
-    </div>
+
+      </CardContent>
+    </Card>
   );
 };
 

@@ -1,17 +1,18 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
 import {
     ResponsiveContainer,
     ComposedChart,
     Area,
-    Line,
     XAxis,
     YAxis,
     Tooltip,
-    CartesianGrid
+    CartesianGrid,
+    Bar,
+    Cell
 } from "recharts";
 import { TradeFilters } from "@/types";
 import { format } from "date-fns";
@@ -19,33 +20,48 @@ import { format } from "date-fns";
 export function FusionGraph({ filters }: { filters?: TradeFilters }) {
     const { data: analytics } = useTradeAnalytics(filters);
 
+    const data = useMemo(() => {
+        if (!analytics) return [];
+        const { drawdown, timeSeries } = analytics;
+
+        // Merge PnL and Drawdown data
+        return timeSeries.map((item) => {
+            // Find matching drawdown point (approximate by timestamp)
+            const ddPoint = drawdown.drawdownSeries.find(
+                (d) => Math.abs(d.timestamp - item.timestamp) < 1000 * 60 * 60 * 24 // within 24h
+            );
+
+            return {
+                ...item,
+                drawdown: ddPoint ? ddPoint.drawdown : 0,
+                drawdownPct: ddPoint ? (ddPoint.drawdown / (ddPoint.peak || 1)) * 100 : 0
+            };
+        });
+    }, [analytics]);
+
     if (!analytics) return null;
 
-    const { drawdown, timeSeries } = analytics;
-
-    // Merge PnL and Drawdown data
-    const data = timeSeries.map((item) => {
-        // Find matching drawdown point (approximate by timestamp)
-        const ddPoint = drawdown.drawdownSeries.find(
-            (d) => Math.abs(d.timestamp - item.timestamp) < 1000 * 60 * 60 * 24 // within 24h
+    if (data.length === 0) {
+        return (
+            <Card className="col-span-2 mb-6 border-border/50 bg-card/50 backdrop-blur-sm min-h-[400px] flex items-center justify-center">
+                <div className="text-muted-foreground">No data available for fusion graph</div>
+            </Card>
         );
-
-        return {
-            ...item,
-            drawdown: ddPoint ? ddPoint.drawdown : 0,
-            drawdownPct: ddPoint ? (ddPoint.drawdown / (ddPoint.peak || 1)) * 100 : 0
-        };
-    });
+    }
 
     return (
-        <Card className="col-span-2 mb-6">
+        <Card className="col-span-2 mb-6 border-border/50 bg-card/50 backdrop-blur-sm">
             <CardHeader>
-                <CardTitle>Performance Fusion</CardTitle>
-                <CardDescription>Cumulative PnL vs Drawdown Depth</CardDescription>
+                <div className="flex justify-between items-start">
+                    <div>
+                        <CardTitle>Performance Fusion</CardTitle>
+                        <CardDescription>Cumulative PnL vs Drawdown Depth</CardDescription>
+                    </div>
+                </div>
             </CardHeader>
             <CardContent className="h-[400px]">
                 <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={data}>
+                    <ComposedChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                         <defs>
                             <linearGradient id="colorPnL" x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
@@ -56,31 +72,51 @@ export function FusionGraph({ filters }: { filters?: TradeFilters }) {
                                 <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
                             </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.5} />
                         <XAxis
                             dataKey="timestamp"
                             tickFormatter={(ts) => format(new Date(ts), "MMM dd")}
                             minTickGap={30}
                             fontSize={12}
+                            tick={{ fill: "#94a3b8" }}
+                            axisLine={false}
+                            tickLine={false}
+                            dy={10}
                         />
-                        <YAxis yAxisId="left" orientation="left" fontSize={12} tickFormatter={(val) => `$${val}`} />
-                        <YAxis yAxisId="right" orientation="right" fontSize={12} tickFormatter={(val) => `$${val}`} />
+                        <YAxis
+                            yAxisId="left"
+                            orientation="left"
+                            fontSize={12}
+                            tickFormatter={(val) => `$${val}`}
+                            tick={{ fill: "#94a3b8" }}
+                            axisLine={false}
+                            tickLine={false}
+                        />
+                        <YAxis
+                            yAxisId="right"
+                            orientation="right"
+                            fontSize={12}
+                            tickFormatter={(val) => `-$${Math.abs(val)}`}
+                            tick={{ fill: "#94a3b8" }}
+                            axisLine={false}
+                            tickLine={false}
+                        />
 
                         <Tooltip
                             content={({ active, payload, label }) => {
                                 if (active && payload && payload.length) {
                                     return (
-                                        <div className="bg-background border rounded-lg p-3 shadow-lg text-sm">
-                                            <p className="font-bold mb-2">{format(new Date(label), "PPP")}</p>
+                                        <div className="bg-popover/95 border border-border rounded-xl p-3 shadow-xl backdrop-blur-md text-xs">
+                                            <p className="font-semibold mb-2 text-popover-foreground">{format(new Date(label), "PPP")}</p>
                                             <div className="space-y-1">
-                                                <p className="text-emerald-500 flex justify-between gap-4">
-                                                    <span>Cumulative PnL:</span>
-                                                    <span className="font-mono font-bold">${Number(payload[0].value).toFixed(2)}</span>
-                                                </p>
-                                                <p className="text-rose-500 flex justify-between gap-4">
-                                                    <span>Drawdown:</span>
-                                                    <span className="font-mono font-bold">${Number(payload[1].value).toFixed(2)}</span>
-                                                </p>
+                                                <div className="flex items-center justify-between gap-4">
+                                                    <span className="text-muted-foreground mr-4">Cumulative PnL</span>
+                                                    <span className="font-mono font-bold text-emerald-500">${Number(payload[0].value).toFixed(2)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between gap-4">
+                                                    <span className="text-muted-foreground mr-4">Drawdown</span>
+                                                    <span className="font-mono font-bold text-rose-500">-${Math.abs(Number(payload[1].value)).toFixed(2)}</span>
+                                                </div>
                                             </div>
                                         </div>
                                     );
@@ -97,6 +133,7 @@ export function FusionGraph({ filters }: { filters?: TradeFilters }) {
                             fillOpacity={1}
                             fill="url(#colorPnL)"
                             strokeWidth={2}
+                            animationDuration={1500}
                         />
 
                         <Area
@@ -106,8 +143,9 @@ export function FusionGraph({ filters }: { filters?: TradeFilters }) {
                             stroke="#f43f5e"
                             fillOpacity={1}
                             fill="url(#colorDD)"
-                            strokeWidth={1}
-                            strokeDasharray="5 5"
+                            strokeWidth={2}
+                            strokeDasharray="4 4"
+                            animationDuration={1500}
                         />
                     </ComposedChart>
                 </ResponsiveContainer>

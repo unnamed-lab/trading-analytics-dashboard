@@ -173,7 +173,7 @@ Provide a comprehensive analysis in the following JSON format:
 
       const completion = await openai.chat.completions.create(
         {
-          model: process.env.OPENAI_API_MODEL || "gpt-4o",
+          model: process.env.OPENAI_API_MODEL || "gpt-4o-mini",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },

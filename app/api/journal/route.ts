@@ -7,7 +7,21 @@ export async function GET(request: Request) {
   const tradeId = url.searchParams.get("tradeId");
 
   try {
-    const where = tradeId ? { tradeId } : undefined;
+    const owner = url.searchParams.get("owner");
+
+    // Security: Require either tradeId (specific item) or owner (user's items)
+    // Do NOT allow fetching all journals for all users
+    if (!tradeId && !owner) {
+      return NextResponse.json(
+        { error: "Missing required parameter: tradeId or owner" },
+        { status: 400 }
+      );
+    }
+
+    const where: any = {};
+    if (tradeId) where.tradeId = tradeId;
+    if (owner) where.owner = owner;
+
     const journals = await prisma.journal.findMany({
       where,
       orderBy: { createdAt: "desc" },

@@ -43,9 +43,11 @@ export function useJournals(
   const list = useQuery({
     queryKey: ["journals", publicKey, tradeId],
     queryFn: async (): Promise<Journal[]> => {
-      const url = tradeId
-        ? `${base}?tradeId=${encodeURIComponent(tradeId)}`
-        : base;
+      const params = new URLSearchParams();
+      if (tradeId) params.append("tradeId", tradeId);
+      if (publicKey) params.append("owner", publicKey);
+
+      const url = `${base}?${params.toString()}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch journals");
       return res.json();

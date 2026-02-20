@@ -111,11 +111,12 @@ export async function POST(request: NextRequest) {
         : "0";
 
     // Build system prompt
-    const systemPrompt = `You are an expert trading analyst and coach. Analyze the provided trade data and journal entry to generate actionable insights. Focus on:
-1. Technical execution quality
-2. Psychological patterns
+    const systemPrompt = `You are an expert trading analyst and coach. Analyze the provided trade data and journal entry retrospectively (from the present back to the time of the trade) to generate actionable insights. Focus on:
+1. Technical execution quality and price action context
+2. Psychological patterns and emotional state
 3. Risk management
-4. Specific, actionable improvements
+4. Specific, actionable feedback on how to improve the journal entry itself
+5. High-impact, actionable improvements for future trades
 
 Provide analysis in a constructive, educational tone. Never give financial advice or predictions.`;
 
@@ -152,9 +153,9 @@ ${journalContent}
 
 Provide a comprehensive analysis in the following JSON format:
 {
-  "performanceCritique": "Detailed analysis of trade execution (2-3 sentences)",
-  "emotionalReview": "Analysis of psychological patterns based on journal (2-3 sentences)",
-  "actionableInsights": ["3 specific, actionable insights to improve"],
+  "performanceCritique": "Detailed retrospective analysis of trade execution, price action, and timing (2-3 sentences)",
+  "emotionalReview": "Analysis of psychological patterns and specific feedback on how to improve this journal entry (2-3 sentences)",
+  "actionableInsights": ["3 specific, actionable insights to improve future trades and journaling"],
   "riskAssessment": "Brief assessment of risk management (1-2 sentences)",
   "disclaimer": "Standard disclaimer"
 }`;

@@ -53,7 +53,7 @@ const LEGEND_ITEMS = [
 export function HeatMaps({ filters }: { filters?: TradeFilters }) {
     const { data: analytics, isLoading } = useTradeAnalytics(filters);
     const cardRef = useRef<HTMLDivElement>(null);
-    // Ref placed directly on the scrollable container — no arithmetic needed.
+    // Ref placed directly on the heatmap container — measures the exact available width.
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [containerWidth, setContainerWidth] = useState(0);
     // Track viewport width safely (avoids SSR crash)
@@ -117,7 +117,7 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
         return { startDate: start, endDate: end };
     }, [filters?.period]);
 
-    // Measure the scrollable container directly — no guesswork on padding offsets.
+    // Measure the heatmap container — no padding arithmetic needed.
     useEffect(() => {
         const el = scrollContainerRef.current;
         if (!el) return;
@@ -128,14 +128,26 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
         return () => observer.disconnect();
     }, []);
 
-    const heatmapWidth = useMemo(() => {
+    /**
+     * Derive heatmap dimensions that FILL the container exactly.
+     *
+     * - `heatmapWidth`  always equals the measured container width.
+     * - `rectSize`      is computed so all week-columns fit within the available
+     *                   space, clamped to [8, 13] px so cells stay legible.
+     * - `cellSpace`     fixed at 2 px (tight but readable).
+     */
+    const { heatmapWidth, rectSize, cellSpace } = useMemo(() => {
+        const width = containerWidth || 400;
         const diffDays = Math.ceil((endDate.getTime() - startDate.getTime()) / 86_400_000);
         const weeks = Math.ceil(diffDays / 7);
-        // 13px rect + 3px space = 16px per cell, +50px for day-of-week labels on the left
-        const required = weeks * 16 + 50;
-        // Use the larger of the two so the heatmap fills the card when data is sparse,
-        // but still scrolls horizontally when there are many weeks.
-        return Math.max(containerWidth || 400, required);
+        // ~50 px for the day-of-week label column rendered on the left by the library
+        const DAY_LABEL_WIDTH = 50;
+        const available = width - DAY_LABEL_WIDTH;
+        const sp = 2;
+        // Solve: weeks * (rs + sp) = available  →  rs = available/weeks - sp
+        const computed = Math.floor(available / weeks - sp);
+        const rs = Math.min(13, Math.max(8, computed));
+        return { heatmapWidth: width, rectSize: rs, cellSpace: sp };
     }, [startDate, endDate, containerWidth]);
 
     // ── Skeleton ──────────────────────────────────────────────────────────────
@@ -264,24 +276,23 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
                     <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col">
                         {heatMapData.length > 0 ? (
                             <>
-                                {/* Scrollable heatmap area — ref lives here so we measure exactly
-                                    the space available to the heatmap, with no padding arithmetic. */}
+                                {/*
+                                  Container fills the card. No horizontal scroll — the heatmap
+                                  is sized to fit exactly. ref measures the true available width.
+                                */}
                                 <div
                                     ref={scrollContainerRef}
-                                    className="w-full overflow-x-auto overflow-y-hidden pb-1 flex-1
-                                               scrollbar-thin scrollbar-thumb-rounded
-                                               scrollbar-thumb-muted-foreground/20
-                                               hover:scrollbar-thumb-muted-foreground/40"
+                                    className="w-full overflow-hidden pb-1 flex-1"
                                     style={{ minHeight: 160 }}
                                 >
-                                    <div style={{ width: heatmapWidth, paddingTop: 4, height: '100%' }}>
+                                    <div style={{ width: heatmapWidth, paddingTop: 4, height: "100%" }}>
                                         <HeatMap
                                             value={heatMapData}
                                             startDate={startDate}
                                             endDate={endDate}
                                             width={heatmapWidth}
-                                            rectSize={13}
-                                            space={3}
+                                            rectSize={rectSize}
+                                            space={cellSpace}
                                             legendCellSize={0}
                                             monthPlacement="top"
                                             monthLabels={[

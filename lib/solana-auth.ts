@@ -7,8 +7,7 @@ export function verifySolanaSignature(
   signatureBase58: string,
 ): boolean {
   try {
-    const message = Buffer.from(messageBase64, "base64").toString("utf8");
-    const messageBytes = new TextEncoder().encode(message);
+    const messageBytes = Buffer.from(messageBase64, "base64");
     const signature = bs58.decode(signatureBase58);
     const pubkey = bs58.decode(publicKeyBase58);
 

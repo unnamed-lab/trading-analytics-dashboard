@@ -93,6 +93,8 @@ export async function PATCH(request: Request, { params }: Params) {
         tradeTimestamp: tradeTimestamp ? new Date(tradeTimestamp) : undefined,
         tags: Array.isArray(tags) ? tags : undefined,
         aiAnalyzed: aiAnalyzed === true ? true : undefined,
+        mood: body.mood !== undefined ? body.mood : undefined,
+        images: Array.isArray(body.images) ? body.images : undefined,
       },
     });
 

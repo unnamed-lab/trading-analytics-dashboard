@@ -217,16 +217,19 @@ export interface TradeStats {
 export interface Journal {
   id: string;
   title?: string;
-  tradeId: string;
-  date: string;
-  symbol: string;
-  side: TradeRecord["side"];
-  pnl: number;
-  pnlPercentage: number;
-  notes: string;
-  tags: string[];
-  aiAnalyzed: boolean;
+  tradeId?: string;
+  owner: string;
+  symbol?: string;
+  side?: TradeRecord["side"];
+  pnl?: number;
+  pnlPercentage?: number;
   content: string;
+  tags?: string[];
+  mood?: string | null;
+  images?: string[];
+  aiAnalyzed?: boolean;
+  createdAt: string | Date;
+  updatedAt: string | Date;
 }
 
 // ============================================

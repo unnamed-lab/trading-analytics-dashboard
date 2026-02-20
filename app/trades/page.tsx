@@ -21,8 +21,10 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl, formatQuantity } from "@/types";
 import TradeReviewPanel from "@/components/dashboard/trade-review-panel";
-import { getJournalStatus } from "@/data/mockTrades";
+// import { getJournalStatus } from "@/data/mockTrades"; // Removed mock import
 import { cn } from "@/lib/utils";
+import { useJournals } from "@/hooks/use-journals"; // Added hook
+import bs58 from "bs58"; // Added bs58 for signer
 
 const ITEMS_PER_PAGE = 20;
 const periods = ["All", "7D", "30D"];
@@ -37,8 +39,39 @@ const TradeHistoryPage = () => {
   const [sortBy, setSortBy] = useState<"date" | "pnl" | "price">("date");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey, signMessage } = useWallet();
   const { exportToCSV, exportToJSON } = useExportTrades();
+
+  // Create signer for useJournals
+  const signer = async (messageB64: string) => {
+    if (!signMessage) throw new Error("wallet cannot sign messages");
+    let msgBytes: Uint8Array;
+    if (typeof window !== "undefined" && typeof window.atob === "function") {
+      const binary = window.atob(messageB64);
+      const arr = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+      msgBytes = arr;
+    } else {
+      msgBytes = new Uint8Array(Buffer.from(messageB64, "base64"));
+    }
+    const signed = await signMessage(msgBytes as Uint8Array);
+    const sigBytes = (signed as { signature: Uint8Array })?.signature ?? signed;
+    return bs58.encode(Buffer.from(sigBytes));
+  };
+
+  const publicKeyStr = publicKey?.toBase58() ?? null;
+  const { list: journalList } = useJournals(publicKeyStr, signer);
+
+  // Memoize journaled trade IDs for O(1) lookup
+  const journaledTradeIds = useMemo(() => {
+    if (!journalList.data) return new Set<string>();
+    const ids = new Set<string>();
+    journalList.data.forEach((j: { tradeId?: string | null }) => {
+      if (j.tradeId) ids.add(j.tradeId);
+    });
+    return ids;
+  }, [journalList.data]);
+
 
   // Use real data if wallet is connected, otherwise use mock data
   const { data: realTrades = [], isLoading: realLoading } = useAllTrades({
@@ -54,7 +87,7 @@ const TradeHistoryPage = () => {
   const isLoading = connected ? realLoading : mockLoading;
 
   // Basic error handling for real trades
-  const isError = connected && (realTrades as any)?.error;
+  const isError = connected && (realTrades as { error?: string })?.error;
 
   const perpTrades = useMemo(() => {
     return allTrades.filter(t => t.discriminator === 19 || t.tradeType === "perp");
@@ -251,7 +284,7 @@ const TradeHistoryPage = () => {
           {/* Sort controls */}
           <select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
+            onChange={(e) => setSortBy(e.target.value as "date" | "pnl" | "price")}
             className="rounded border border-border px-3 py-1.5 text-sm bg-transparent"
           >
             <option value="date">Sort by Date</option>
@@ -332,7 +365,8 @@ const TradeHistoryPage = () => {
             </thead>
             <tbody>
               {paginatedTrades.map((trade) => {
-                const journalStatus = getJournalStatus(trade.id);
+                const isJournaled = journaledTradeIds.has(trade.id);
+                // const journalStatus = getJournalStatus(trade.id); // Replaced with real data
                 const bullish = isBullishSide(trade.side);
                 return (
                   <tr
@@ -394,17 +428,17 @@ const TradeHistoryPage = () => {
                       {trade.pnlPercentage.toFixed(2)}%
                     </td>
                     <td className="px-5 py-3.5">
-                      {journalStatus === "journaled" ? (
+                      {isJournaled ? (
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-3 py-0.5 text-xs text-foreground">
                           <span className="h-1.5 w-1.5 rounded-full bg-profit" />
                           Journaled
                         </span>
-                      ) : journalStatus === "missing" ? (
+                      ) : (
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-loss/30 bg-loss/10 px-3 py-0.5 text-xs text-loss">
                           <span className="h-1.5 w-1.5 rounded-full bg-loss" />
                           Missing
                         </span>
-                      ) : null}
+                      )}
                     </td>
                   </tr>
                 );
@@ -421,7 +455,6 @@ const TradeHistoryPage = () => {
               <span className="font-mono font-bold text-foreground">
                 {(currentPage - 1) * ITEMS_PER_PAGE + 1}
               </span>{" "}
-              to{" "}
               <span className="font-mono font-bold text-foreground">
                 {Math.min(currentPage * ITEMS_PER_PAGE, filteredTrades.length)}
               </span>{" "}

@@ -29,6 +29,8 @@ import bs58 from "bs58";
 import { useJournals } from "@/hooks/use-journals";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Button } from "../ui/button";
+import { cn } from "@/lib/utils";
 
 interface TradeReviewPanelProps {
   trade: TradeRecord;
@@ -85,9 +87,20 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
     existing?.tags ?? trade.tags ?? []
   );
 
+  const [symbol, setSymbol] = useState(existing?.symbol ?? trade.symbol ?? "");
+  const [side, setSide] = useState<TradeRecord["side"] | "">(
+    (existing?.side as TradeRecord["side"]) ?? trade.side ?? ""
+  );
+  const [pnl, setPnl] = useState(existing?.pnl?.toString() ?? trade.pnl?.toString() ?? "0");
+  const [pnlPct, setPnlPct] = useState(existing?.pnlPercentage?.toString() ?? trade.pnlPercentage?.toString() ?? "0");
+
   useEffect(() => {
     setJournalContent(existing?.content ?? trade.notes ?? "");
     setTags(existing?.tags ?? trade.tags ?? []);
+    setSymbol(existing?.symbol ?? trade.symbol ?? "");
+    setSide(existing?.side ?? trade.side ?? "");
+    setPnl(existing?.pnl?.toString() ?? trade.pnl?.toString() ?? "0");
+    setPnlPct(existing?.pnlPercentage?.toString() ?? trade.pnlPercentage?.toString() ?? "0");
   }, [existing?.id, trade.id]);
 
   const addTag = (tag: string) => {
@@ -215,31 +228,54 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
 
             <div className="bg-card/20 border border-border/40 rounded-xl overflow-hidden">
               <div className="grid grid-cols-2 border-b border-border/40">
-                <div className="p-4 border-r border-border/40">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block mb-1">Avg Entry</span>
-                  <span className="font-mono text-sm font-semibold">{formatPrice(trade.entryPrice)}</span>
+                <div className="p-4 border-r border-border/40 space-y-2">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block font-bold">Symbol</span>
+                  <Input
+                    value={symbol}
+                    onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                    className="h-8 text-xs bg-background/30 border-border/40 font-mono"
+                  />
                 </div>
-                <div className="p-4">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block mb-1">Avg Exit</span>
-                  <span className={`font-mono text-sm font-semibold ${isProfitable ? "text-emerald-500" : "text-rose-500"}`}>
-                    {formatPrice(trade.exitPrice)}
-                  </span>
+                <div className="p-4 space-y-2">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block font-bold">Side</span>
+                  <div className="flex bg-background/30 rounded-lg p-1 border border-border/40 gap-1 h-8">
+                    <Button
+                      variant={side === "long" ? "secondary" : "ghost"}
+                      size="sm"
+                      className={cn("flex-1 h-full text-[9px] font-bold uppercase p-0", side === "long" && "bg-emerald-500/10 text-emerald-500")}
+                      onClick={() => setSide("long")}
+                    >
+                      Long
+                    </Button>
+                    <Button
+                      variant={side === "short" ? "secondary" : "ghost"}
+                      size="sm"
+                      className={cn("flex-1 h-full text-[9px] font-bold uppercase p-0", side === "short" && "bg-rose-500/10 text-rose-500")}
+                      onClick={() => setSide("short")}
+                    >
+                      Short
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-2">
-                <div className="p-4 border-r border-border/40">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block mb-1">Type</span>
-                  <div className="flex items-center gap-2">
-                    <Layers className="h-3 w-3 text-primary/70" />
-                    <span className="text-xs font-medium uppercase">{trade.tradeType}</span>
-                  </div>
+                <div className="p-4 border-r border-border/40 space-y-2">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block font-bold">PnL ($)</span>
+                  <Input
+                    type="number"
+                    value={pnl}
+                    onChange={(e) => setPnl(e.target.value)}
+                    className="h-8 text-xs bg-background/30 border-border/40 font-mono"
+                  />
                 </div>
-                <div className="p-4">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block mb-1">Order</span>
-                  <div className="flex items-center gap-2">
-                    <Activity className="h-3 w-3 text-primary/70" />
-                    <span className="text-xs font-medium uppercase">{trade.orderType}</span>
-                  </div>
+                <div className="p-4 space-y-2">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest block font-bold">ROI (%)</span>
+                  <Input
+                    type="number"
+                    value={pnlPct}
+                    onChange={(e) => setPnlPct(e.target.value)}
+                    className="h-8 text-xs bg-background/30 border-border/40 font-mono"
+                  />
                 </div>
               </div>
             </div>
@@ -345,13 +381,21 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                     id: existing.id,
                     content: journalContent,
                     tags,
+                    symbol,
+                    side: side || undefined,
+                    pnl: pnl ? parseFloat(pnl) : undefined,
+                    pnlPercentage: pnlPct ? parseFloat(pnlPct) : undefined,
                   });
                 } else {
                   await create.mutateAsync({
                     tradeId: trade.id,
                     content: journalContent,
-                    title: `${trade.symbol} ${trade.id}`,
+                    title: `${symbol} Analysis`,
                     tags,
+                    symbol,
+                    side: side || undefined,
+                    pnl: pnl ? parseFloat(pnl) : undefined,
+                    pnlPercentage: pnlPct ? parseFloat(pnlPct) : undefined,
                   });
                 }
               } catch (e) {

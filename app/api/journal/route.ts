@@ -28,6 +28,7 @@ export async function GET(request: Request) {
     });
     return NextResponse.json(journals);
   } catch (err) {
+    console.error("[JOURNAL_GET_ERROR]", err);
     return NextResponse.json(
       { error: "Failed to fetch journals" },
       { status: 500 },
@@ -89,11 +90,14 @@ export async function POST(request: Request) {
         tradeTimestamp: tradeTimestamp ? new Date(tradeTimestamp) : undefined,
         tags: Array.isArray(tags) ? tags : undefined,
         aiAnalyzed: aiAnalyzed === true,
+        mood: body.mood || null,
+        images: Array.isArray(body.images) ? body.images : undefined,
       },
     });
 
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
+    console.error("[JOURNAL_POST_ERROR]", err);
     return NextResponse.json(
       { error: "Failed to create journal" },
       { status: 500 },

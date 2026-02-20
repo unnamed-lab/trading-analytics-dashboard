@@ -29,6 +29,10 @@ model Journal {
   riskScore  Float?   // 0-100 risk score based on trade params
   magicTags  String[] @default([]) // AI-generated tags like #FOMO, #Revenge
 
+  // New Sweet Features
+  mood       String?  // E.g. "Confident", "Anxious", "Neutral"
+  images     String[] @default([]) // Array of image URLs
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   

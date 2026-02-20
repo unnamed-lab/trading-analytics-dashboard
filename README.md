@@ -4,7 +4,7 @@ A professional Solana trading analytics MVP offering an immersive user experienc
 
 This project was built for the [Superteam Bounty: Design Trading Analytics Dashboard with Journal & Portfolio Analysis](https://superteam.fun/earn/listing/design-trading-analytics-dashboard-with-journal-and-portfolio-analysis) by Deriverse. 
 
-**Live Demo:** [Hosted Vercel Link](https://deriverse-analytics-unc.vercel.app/)
+**Live Demo:** [Hosted Render Link](https://deriverse-analytics-unc.onrender.com)
 
 ## Features
 

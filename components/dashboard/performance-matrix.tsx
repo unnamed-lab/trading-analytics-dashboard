@@ -5,13 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { DashboardCardSkeleton } from "@/components/ui/dashboard-states";
 import { cn } from "@/lib/utils";
 import { TradeFilters } from "@/types";
 
 export function PerformanceMatrix({ filters }: { filters?: TradeFilters }) {
-    const { data: analytics } = useTradeAnalytics(filters);
+    const { data: analytics, isLoading } = useTradeAnalytics(filters);
 
-    if (!analytics) return null;
+    if (isLoading || !analytics) return <DashboardCardSkeleton title="Performance Matrix" />;
 
     const { longShort } = analytics;
     const { longTrades, shortTrades, ratio, bias } = longShort;

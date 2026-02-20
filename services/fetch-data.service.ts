@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "dotenv/config";
 import { Signature, address, createSolanaRpc, devnet } from "@solana/kit";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Connection } from "@solana/web3.js";
 import {
   LogType,
   SpotFillOrderReportModel,
@@ -87,6 +87,7 @@ export interface FetchResult {
 
 export class TransactionDataFetcher {
   private rpc: ReturnType<typeof createSolanaRpc>;
+  private connection: Connection;
   private walletPublicKey: PublicKey | null = null;
   private engine: any = null;
   private requestDelayMs: number = 300;
@@ -103,6 +104,7 @@ export class TransactionDataFetcher {
     maxTransactions = 1000,
   ) {
     this.rpc = createSolanaRpc(devnet(rpcUrl));
+    this.connection = new Connection(rpcUrl, "confirmed");
     this.requestDelayMs = requestDelayMs;
     this.maxTransactions = maxTransactions;
     this.programId = process.env.PROGRAM_ID!;
@@ -837,32 +839,39 @@ export class TransactionDataFetcher {
       `\n🔍 Filtering transactions for program ID: ${this.programId}`,
     );
 
-    for (const sigInfo of signatures) {
-      if (sigInfo.err !== null) continue;
+    // Filter out invalid signatures first
+    const validSignatures = signatures.filter(s => s.err === null);
+
+    // Process signatures purely serially to strictly control request rate
+    // e.g. 150ms delay = max ~6.6 requests per second (well below 10-40 req/s limits)
+    for (let i = 0; i < validSignatures.length; i++) {
+      const sigInfo = validSignatures[i];
+
+      if (i % 10 === 0) {
+        console.log(`   Processing signature ${i + 1}/${validSignatures.length}...`);
+      }
+
       try {
-        const txResponse = await this.fetchWithRetries(() =>
-          this.rpc
-            .getTransaction(sigInfo.signature as Signature, {
-              maxSupportedTransactionVersion: 0,
-              encoding: "jsonParsed",
-            })
-            .send(),
+        const tx = await this.fetchWithRetries(
+          () => this.connection.getParsedTransaction(sigInfo.signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: "confirmed"
+          }),
+          4, // retries
+          2000 // base delay
         );
 
-        const tx = (txResponse as any)?.value ?? txResponse;
-        if (!tx) continue;
-
-        if (this.transactionInvolvesProgram(tx)) {
+        if (tx && this.transactionInvolvesProgram(tx)) {
           relevant.push({ sigInfo, tx });
-          console.log(
-            `   ✅ ${sigInfo.signature.substring(0, 8)}... involves program`,
-          );
         }
-        await this.delay(50);
-      } catch (_) {
-        continue;
+      } catch (error: any) {
+        console.error(`   ❌ Failed to fetch ${sigInfo.signature}: ${error.message}`);
       }
+
+      // Strict delay between every single request
+      await this.delay(150);
     }
+
     return relevant;
   }
 

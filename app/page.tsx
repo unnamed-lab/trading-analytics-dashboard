@@ -11,6 +11,7 @@ import { FusionGraph } from "@/components/dashboard/fusion-graph";
 import { PerformanceMatrix } from "@/components/dashboard/performance-matrix";
 import { FeeWaterfall } from "@/components/dashboard/fee-waterfall";
 import { MomentumGauge } from "@/components/dashboard/momentum-gauge";
+import KPIRow from "@/components/dashboard/kpi-row";
 import { AICoach } from "@/components/dashboard/ai-coach";
 import { LoadingTerminal } from "@/components/ui/loading-terminal";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -69,15 +70,12 @@ export default function HomePage() {
     return <LoadingTerminal onComplete={() => setShowTerminal(false)} />;
   }
 
-  // 3. Skeleton Loading (when fetching new data or filtering)
-  // We show skeleton if we are loading AND don't have data yet (initial fetch)
-  // OR if we are explicitly fetching and want to show a loading state (optional, but requested by user)
-  // The user asked: "when data is not present and is Fetching or Pending"
-  const shouldShowSkeleton = (isLoading || isFetching || realLoading) && !analytics && !realTrades;
-
-  if (shouldShowSkeleton) {
-    return <DashboardSkeleton />;
-  }
+  // 3. Skeleton Loading - REMOVED full page swap
+  // Individual components now handle their own skeletons based on isLoading/isFetching
+  // const shouldShowSkeleton = (isLoading || isFetching || realLoading) && !analytics && !realTrades;
+  // if (shouldShowSkeleton) {
+  //   return <DashboardSkeleton />;
+  // }
 
   return (
     <div className="min-h-screen bg-background/50 pb-20 relative animate-in fade-in duration-500">
@@ -97,6 +95,8 @@ export default function HomePage() {
       </div>
 
       <div className="container mx-auto px-4 sm:px-6 space-y-6 mt-6">
+        {/* KPI Row Overview */}
+        <KPIRow />
 
         {/* 2. Top Row: Momentum & Heat Maps */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">

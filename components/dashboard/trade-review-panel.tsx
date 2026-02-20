@@ -30,6 +30,7 @@ import { useJournals } from "@/hooks/use-journals";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "../ui/button";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 interface TradeReviewPanelProps {
@@ -93,6 +94,9 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
   );
   const [pnl, setPnl] = useState(existing?.pnl?.toString() ?? trade.pnl?.toString() ?? "0");
   const [pnlPct, setPnlPct] = useState(existing?.pnlPercentage?.toString() ?? trade.pnlPercentage?.toString() ?? "0");
+  const [title, setTitle] = useState(existing?.title ?? `${trade.symbol} Trade Review`);
+  const [aiEnabled, setAiEnabled] = useState(!existing?.aiAnalyzed);
+  const [isAILoading, setIsAILoading] = useState(false);
 
   useEffect(() => {
     setJournalContent(existing?.content ?? trade.notes ?? "");
@@ -101,6 +105,8 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
     setSide(existing?.side ?? trade.side ?? "");
     setPnl(existing?.pnl?.toString() ?? trade.pnl?.toString() ?? "0");
     setPnlPct(existing?.pnlPercentage?.toString() ?? trade.pnlPercentage?.toString() ?? "0");
+    setTitle(existing?.title ?? `${trade.symbol} Trade Review`);
+    if (existing?.aiAnalyzed) setAiEnabled(false); // If already analyzed, default toggle to off for edits unless user wants to re-run
   }, [existing?.id, trade.id]);
 
   const addTag = (tag: string) => {
@@ -287,7 +293,23 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                   <PenLine className="h-4 w-4" />
                   <span className="text-xs font-semibold uppercase tracking-widest">Trade Journal</span>
                 </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-primary/70">
+                    AI Auto-Analyze
+                  </span>
+                  <Switch
+                    checked={aiEnabled}
+                    onCheckedChange={setAiEnabled}
+                    className="data-[state=checked]:bg-primary"
+                  />
+                </div>
               </div>
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Title (e.g. Morning Scalp Breakout)"
+                className="font-bold border-border/40 bg-card/10 focus-visible:ring-primary/40 focus-visible:ring-offset-0 placeholder:text-muted-foreground/40"
+              />
               <textarea
                 value={journalContent}
                 onChange={(e) => setJournalContent(e.target.value)}
@@ -376,36 +398,77 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
           <button
             onClick={async () => {
               try {
+                let finalContent = journalContent;
+                let aiAnalyzedFlag = existing?.aiAnalyzed || false;
+
+                if (aiEnabled) {
+                  setIsAILoading(true);
+                  if (signMessage && publicKey) {
+                    try {
+                      const message = `Authenticate to Trade Analytics Dashboard\nTimestamp: ${Date.now()}`;
+                      const encodedMessage = Buffer.from(message).toString("base64");
+                      const signature = await signer(encodedMessage);
+
+                      const response = await fetch("/api/ai/review", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "x-solana-publickey": publicKey.toBase58(),
+                          "x-solana-signature": signature,
+                          "x-solana-message": encodedMessage,
+                        },
+                        body: JSON.stringify({
+                          trade,
+                          journalContent: journalContent || "No specific notes provided.",
+                        }),
+                      });
+
+                      if (response.ok) {
+                        const aiData = await response.json();
+                        const aiMarkdown = `\n\n## 🤖 AI Analysis\n\n**Performance Critique:**\n${aiData.performanceCritique}\n\n**Psychology & Emotions:**\n${aiData.emotionalReview}\n\n**Actionable Insights:**\n${aiData.actionableInsights.map((i: string) => `- ${i}`).join("\n")}\n\n**Risk Assessment:**\n${aiData.riskAssessment}\n\n*> ${aiData.disclaimer}*`;
+                        finalContent = finalContent + aiMarkdown;
+                        aiAnalyzedFlag = true;
+                      }
+                    } catch (aiErr) {
+                      console.error("AI Analysis failed:", aiErr);
+                    }
+                  }
+                  setIsAILoading(false);
+                }
+
                 if (existing) {
                   await update.mutateAsync({
                     id: existing.id,
-                    content: journalContent,
+                    title: title || undefined,
+                    content: finalContent,
                     tags,
                     symbol,
                     side: side || undefined,
                     pnl: pnl ? parseFloat(pnl) : undefined,
                     pnlPercentage: pnlPct ? parseFloat(pnlPct) : undefined,
+                    aiAnalyzed: aiAnalyzedFlag,
                   });
                 } else {
                   await create.mutateAsync({
                     tradeId: trade.id,
-                    content: journalContent,
-                    title: `${symbol} Analysis`,
+                    title: title || undefined,
+                    content: finalContent,
                     tags,
                     symbol,
                     side: side || undefined,
                     pnl: pnl ? parseFloat(pnl) : undefined,
                     pnlPercentage: pnlPct ? parseFloat(pnlPct) : undefined,
+                    aiAnalyzed: aiAnalyzedFlag,
                   });
                 }
               } catch (e) {
-                // ignore
+                setIsAILoading(false);
               }
             }}
-            disabled={create.isPending || update.isPending}
+            disabled={create.isPending || update.isPending || isAILoading}
             className="flex-[2] rounded-xl bg-primary py-3 text-sm font-bold text-primary-foreground hover:shadow-[0_0_20px_rgba(var(--primary),0.3)] hover:brightness-110 transition-all disabled:opacity-50"
           >
-            {create.isPending || update.isPending ? (
+            {create.isPending || update.isPending || isAILoading ? (
               <Loader2 className="animate-spin h-4 w-4 mx-auto" />
             ) : (
               "Save Review"

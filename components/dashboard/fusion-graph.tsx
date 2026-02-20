@@ -3,6 +3,7 @@
 import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { ChartSkeleton } from "@/components/ui/dashboard-states";
 import {
     ResponsiveContainer,
     ComposedChart,
@@ -18,7 +19,7 @@ import { TradeFilters } from "@/types";
 import { format } from "date-fns";
 
 export function FusionGraph({ filters }: { filters?: TradeFilters }) {
-    const { data: analytics } = useTradeAnalytics(filters);
+    const { data: analytics, isLoading } = useTradeAnalytics(filters);
 
     const data = useMemo(() => {
         if (!analytics) return [];
@@ -38,6 +39,8 @@ export function FusionGraph({ filters }: { filters?: TradeFilters }) {
             };
         });
     }, [analytics]);
+
+    if (isLoading) return <ChartSkeleton />;
 
     if (!analytics) return null;
 

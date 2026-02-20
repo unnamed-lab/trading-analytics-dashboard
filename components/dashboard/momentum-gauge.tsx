@@ -4,6 +4,7 @@ import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useAllTrades } from "@/hooks/use-trade-queries";
 import { cn } from "@/lib/utils";
+import { GaugeSkeleton } from "@/components/ui/dashboard-states";
 import { TradeFilters } from "@/types";
 
 // ─── Gauge geometry constants ─────────────────────────────────────────────────
@@ -14,15 +15,15 @@ const CY = SVG_H;       // arc pivot is at bottom-centre of the viewBox
 const R_OUTER = 130;
 const R_INNER = 90;
 const R_NEEDLE = 108;   // needle length
-const R_TICKS  = R_OUTER + 8;
+const R_TICKS = R_OUTER + 8;
 
 // Zone definitions: [startScore, endScore, color]
 const ZONES: [number, number, string][] = [
-    [  0,  20, "#3b82f6"], // cold – blue
-    [ 20,  40, "#6366f1"], // cool – indigo
-    [ 40,  60, "#10b981"], // neutral – emerald
-    [ 60,  80, "#f59e0b"], // warm – amber
-    [ 80, 100, "#ef4444"], // hot – red
+    [0, 20, "#3b82f6"], // cold – blue
+    [20, 40, "#6366f1"], // cool – indigo
+    [40, 60, "#10b981"], // neutral – emerald
+    [60, 80, "#f59e0b"], // warm – amber
+    [80, 100, "#ef4444"], // hot – red
 ];
 
 const TICK_VALUES = [0, 25, 50, 75, 100];
@@ -62,14 +63,14 @@ const STATUS_CONFIG: Record<
     string,
     { label: string; textClass: string; bgClass: string; borderClass: string }
 > = {
-    explosive:    { label: "🚀 Explosive",    textClass: "text-rose-400",   bgClass: "bg-rose-500/10",   borderClass: "border-rose-500/30"   },
-    onfire:       { label: "🔥 On Fire",      textClass: "text-orange-400", bgClass: "bg-orange-500/10", borderClass: "border-orange-500/30" },
-    heatingup:    { label: "📈 Heating Up",   textClass: "text-amber-400",  bgClass: "bg-amber-500/10",  borderClass: "border-amber-500/30"  },
-    stable:       { label: "⚖️ Stable",       textClass: "text-emerald-400",bgClass: "bg-emerald-500/10",borderClass: "border-emerald-500/30"},
-    sideways:     { label: "🌊 Sideways",     textClass: "text-indigo-400", bgClass: "bg-indigo-500/10", borderClass: "border-indigo-500/30" },
-    coolingdown:  { label: "📉 Cooling Down", textClass: "text-cyan-400",   bgClass: "bg-cyan-500/10",   borderClass: "border-cyan-500/30"   },
-    icecold:      { label: "🧊 Ice Cold",     textClass: "text-blue-400",   bgClass: "bg-blue-500/10",   borderClass: "border-blue-500/30"   },
-    nodata:       { label: "— No Data",       textClass: "text-muted-foreground", bgClass: "bg-muted/20", borderClass: "border-border/40" },
+    explosive: { label: "🚀 Explosive", textClass: "text-rose-400", bgClass: "bg-rose-500/10", borderClass: "border-rose-500/30" },
+    onfire: { label: "🔥 On Fire", textClass: "text-orange-400", bgClass: "bg-orange-500/10", borderClass: "border-orange-500/30" },
+    heatingup: { label: "📈 Heating Up", textClass: "text-amber-400", bgClass: "bg-amber-500/10", borderClass: "border-amber-500/30" },
+    stable: { label: "⚖️ Stable", textClass: "text-emerald-400", bgClass: "bg-emerald-500/10", borderClass: "border-emerald-500/30" },
+    sideways: { label: "🌊 Sideways", textClass: "text-indigo-400", bgClass: "bg-indigo-500/10", borderClass: "border-indigo-500/30" },
+    coolingdown: { label: "📉 Cooling Down", textClass: "text-cyan-400", bgClass: "bg-cyan-500/10", borderClass: "border-cyan-500/30" },
+    icecold: { label: "🧊 Ice Cold", textClass: "text-blue-400", bgClass: "bg-blue-500/10", borderClass: "border-blue-500/30" },
+    nodata: { label: "— No Data", textClass: "text-muted-foreground", bgClass: "bg-muted/20", borderClass: "border-border/40" },
 };
 
 // ─── Ease function for needle animation ──────────────────────────────────────
@@ -77,7 +78,8 @@ const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
-    const { data: trades } = useAllTrades({ filters });
+    const { data: trades, isLoading } = useAllTrades({ filters });
+
     const [displayAngle, setDisplayAngle] = useState(0); // start at leftmost (score=0)
     const animRef = useRef<number | null>(null);
     const prevAngleRef = useRef(0);
@@ -100,7 +102,7 @@ export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
 
         const winRate = (wins / n) * 100;
         const rsiRaw = gains + losses === 0 ? 50 : (gains / (gains + losses)) * 100;
-        const score  = Math.round(rsiRaw * 0.7 + winRate * 0.3);
+        const score = Math.round(rsiRaw * 0.7 + winRate * 0.3);
 
         // Consistency: inverse coefficient of variation
         const avgPnL = totalPnL / n;
@@ -109,7 +111,7 @@ export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
         const consistency = Math.round(Math.max(0, Math.min(100, 100 - cv * 20)));
 
         let statusKey = "stable";
-        if      (score >= 80) statusKey = "explosive";
+        if (score >= 80) statusKey = "explosive";
         else if (score >= 70) statusKey = "onfire";
         else if (score >= 60) statusKey = "heatingup";
         else if (score <= 20) statusKey = "icecold";
@@ -145,10 +147,12 @@ export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
         return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
     }, [analytics.score, animateTo]);
 
+    if (isLoading) return <GaugeSkeleton />;
+
     // ── Needle tip & base ─────────────────────────────────────────────────────
-    const needleTip  = polar(displayAngle, R_NEEDLE);
+    const needleTip = polar(displayAngle, R_NEEDLE);
     const needleLeft = polar(displayAngle + 90, 5);
-    const needleRight= polar(displayAngle - 90, 5);
+    const needleRight = polar(displayAngle - 90, 5);
 
     const status = STATUS_CONFIG[analytics.statusKey] ?? STATUS_CONFIG.nodata;
 
@@ -239,7 +243,7 @@ export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
 
                     {/* Tick marks + labels */}
                     {TICK_VALUES.map((v) => {
-                        const a  = scoreToAngle(v);
+                        const a = scoreToAngle(v);
                         const p1 = polar(a, R_OUTER + 3);
                         const p2 = polar(a, R_OUTER + 12);
                         const lp = polar(a, R_TICKS + 10);
@@ -295,7 +299,7 @@ export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
 
                     {/* Pivot hub */}
                     <circle cx={CX} cy={CY} r={10} fill="#64748b" stroke="rgb(51 65 85 / 0.6)" strokeWidth={2} />
-                    <circle cx={CX} cy={CY} r={4}  fill="#e2e8f0f8" />
+                    <circle cx={CX} cy={CY} r={4} fill="#e2e8f0f8" />
                 </svg>
 
                 {/* ── Score score display ──────────────────────────────────── */}
@@ -324,7 +328,7 @@ export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
                         label="Consistency"
                         valueClass={
                             analytics.consistency >= 70 ? "text-emerald-400" :
-                            analytics.consistency >= 40 ? "text-amber-400"   : "text-rose-400"
+                                analytics.consistency >= 40 ? "text-amber-400" : "text-rose-400"
                         }
                     />
                 </div>

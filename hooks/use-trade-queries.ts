@@ -36,14 +36,21 @@ const rpcEndpoint = process.env.NEXT_PUBLIC_SOLANA_RPC || "https://api.mainnet-b
 let fetcherInstance: TransactionDataFetcher | null = null;
 
 const getFetcher = (rpcUrl: string, programId?: string) => {
+  // If instance exists but RPC URL changed, recreate it
+  if (fetcherInstance && (fetcherInstance as any).rpcUrl !== rpcUrl) {
+    fetcherInstance = null;
+  }
+
   if (!fetcherInstance) {
     fetcherInstance = new TransactionDataFetcher(
       rpcUrl,
       programId || process.env.NEXT_PUBLIC_PROGRAM_ID,
-      parseInt(process.env.NEXT_PUBLIC_ENGINE_VERSION || "1", 10), // version from env
+      parseInt(process.env.NEXT_PUBLIC_ENGINE_VERSION || "14", 10), // version from env
       300, // delay
       1000, // max transactions
     );
+    // Attach rpcUrl to instance for future checks (hacky but effective since it's private in class)
+    (fetcherInstance as any).rpcUrl = rpcUrl;
   }
   return fetcherInstance;
 };

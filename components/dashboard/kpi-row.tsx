@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import {
   DashboardCardSkeleton,
+  KPISkeleton,
   DashboardError,
 } from "@/components/ui/dashboard-states";
 import {
@@ -168,7 +169,7 @@ export default function KPIRow({
     return (
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[...Array(5)].map((_, i) => (
-          <DashboardCardSkeleton key={i} className="h-32" />
+          <KPISkeleton key={i} />
         ))}
       </div>
     );

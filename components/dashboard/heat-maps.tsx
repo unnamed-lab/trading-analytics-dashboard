@@ -3,6 +3,7 @@
 import { useMemo, useRef, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { GridSkeleton, KPISkeleton } from "@/components/ui/dashboard-states";
 import {
     ResponsiveContainer,
     BarChart,
@@ -50,8 +51,10 @@ const LEGEND_ITEMS = [
 ];
 
 export function HeatMaps({ filters }: { filters?: TradeFilters }) {
-    const { data: analytics } = useTradeAnalytics(filters);
+    const { data: analytics, isLoading } = useTradeAnalytics(filters);
     const cardRef = useRef<HTMLDivElement>(null);
+    // Ref placed directly on the scrollable container — no arithmetic needed.
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [containerWidth, setContainerWidth] = useState(0);
     // Track viewport width safely (avoids SSR crash)
     const [viewportWidth, setViewportWidth] = useState(1024);
@@ -114,39 +117,33 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
         return { startDate: start, endDate: end };
     }, [filters?.period]);
 
-    // Measure card width for responsive heatmap
+    // Measure the scrollable container directly — no guesswork on padding offsets.
     useEffect(() => {
-        if (!cardRef.current) return;
-        const update = () => {
-            if (cardRef.current) setContainerWidth(cardRef.current.clientWidth - 48);
-        };
+        const el = scrollContainerRef.current;
+        if (!el) return;
+        const update = () => setContainerWidth(el.clientWidth);
         update();
         const observer = new ResizeObserver(update);
-        observer.observe(cardRef.current);
+        observer.observe(el);
         return () => observer.disconnect();
     }, []);
 
     const heatmapWidth = useMemo(() => {
         const diffDays = Math.ceil((endDate.getTime() - startDate.getTime()) / 86_400_000);
         const weeks = Math.ceil(diffDays / 7);
-        const required = weeks * 19 + 40; // 15px rect + 4px gap = 19, plus label margin
-        return Math.max(containerWidth || 300, required);
+        // 13px rect + 3px space = 16px per cell, +50px for day-of-week labels on the left
+        const required = weeks * 16 + 50;
+        // Use the larger of the two so the heatmap fills the card when data is sparse,
+        // but still scrolls horizontally when there are many weeks.
+        return Math.max(containerWidth || 400, required);
     }, [startDate, endDate, containerWidth]);
 
     // ── Skeleton ──────────────────────────────────────────────────────────────
-    if (!analytics) {
+    if (isLoading || !analytics) {
         return (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                {[1, 2].map((i) => (
-                    <Card key={i} className="border-border/50 bg-card/50 backdrop-blur-sm">
-                        <CardContent className="h-[300px] flex items-center justify-center">
-                            <div className="flex flex-col items-center gap-3">
-                                <div className="h-2 w-32 rounded-full bg-muted/50 animate-pulse" />
-                                <div className="h-2 w-24 rounded-full bg-muted/30 animate-pulse" />
-                            </div>
-                        </CardContent>
-                    </Card>
-                ))}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-full">
+                <GridSkeleton />
+                <GridSkeleton />
             </div>
         );
     }
@@ -225,7 +222,6 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
                                         tick={{ fill: "#64748b" }}
                                         tickLine={false}
                                         axisLine={false}
-                                        // safe: use state, not window directly
                                         interval={viewportWidth < 640 ? 3 : 1}
                                     />
                                     <YAxis hide />
@@ -268,8 +264,10 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
                     <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col">
                         {heatMapData.length > 0 ? (
                             <>
-                                {/* Scrollable heatmap area */}
+                                {/* Scrollable heatmap area — ref lives here so we measure exactly
+                                    the space available to the heatmap, with no padding arithmetic. */}
                                 <div
+                                    ref={scrollContainerRef}
                                     className="w-full overflow-x-auto overflow-y-hidden pb-1 flex-1
                                                scrollbar-thin scrollbar-thumb-rounded
                                                scrollbar-thumb-muted-foreground/20

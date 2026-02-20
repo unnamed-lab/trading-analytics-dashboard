@@ -87,11 +87,10 @@ const TradeHistory = ({
 
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-border bg-card p-5">
-        <div className="flex items-center justify-between pb-4">
-          <h3 className="font-semibold text-sm text-foreground">
-            Recent Perp Trades
-          </h3>
+      <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="h-4 w-32 bg-muted/20 rounded animate-pulse" />
+          <div className="h-4 w-16 bg-muted/20 rounded animate-pulse" />
         </div>
         <TableSkeleton rows={5} className="w-full" />
       </div>

@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { formatPnl } from "@/types";
 import { format } from "date-fns";
+import ReactMarkdown from "react-markdown";
 import {
     Plus,
     ArrowRight,
@@ -24,6 +25,7 @@ interface JournalEntry {
     tags?: string[] | null;
     mood?: string | null;
     images?: string[] | null;
+    aiAnalyzed?: boolean | null;
 }
 
 interface JournalCardProps {
@@ -52,15 +54,17 @@ export function JournalCard({ journal, onEdit, onDelete, className }: JournalCar
                 {/* Top Header: Timestamp & AI Badge */}
                 <div className="flex items-center justify-between text-[10px] font-mono tracking-wider text-muted-foreground/60 uppercase">
                     <span>{format(new Date(journal.createdAt), "yyyy-MM-dd HH:mm")}</span>
-                    <Badge variant="outline" className="h-5 px-1.5 border-primary/20 bg-primary/5 text-primary text-[9px] font-bold gap-1 animate-pulse">
-                        <Sparkles className="w-2.5 h-2.5" /> AI ANALYZED
-                    </Badge>
+                    {journal.aiAnalyzed && (
+                        <Badge variant="outline" className="h-5 px-1.5 border-primary/20 bg-primary/5 text-primary text-[9px] font-bold gap-1 animate-pulse">
+                            <Sparkles className="w-2.5 h-2.5" /> AI ANALYZED
+                        </Badge>
+                    )}
                 </div>
 
                 {/* Symbol & Side Section */}
                 <div className="flex items-center gap-3">
-                    <h3 className="text-xl font-black tracking-tight text-foreground">
-                        {journal.symbol || "UNKNOWN"}-PERP
+                    <h3 className="text-xl font-black tracking-tight text-foreground truncate w-full" title={journal.title || `${journal.symbol || "UNKNOWN"} Trade`}>
+                        {journal.title || `${journal.symbol || "UNKNOWN"} Trade`}
                     </h3>
                     <Badge
                         variant="secondary"
@@ -100,9 +104,9 @@ export function JournalCard({ journal, onEdit, onDelete, className }: JournalCar
                 {/* Trade Notes Section */}
                 <div className="space-y-2">
                     <div className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest opacity-40">Trade Notes</div>
-                    <p className="text-sm text-muted-foreground/80 line-clamp-3 leading-relaxed font-medium">
-                        {content || "No notes provided for this trade."}
-                    </p>
+                    <div className="text-sm text-muted-foreground/80 line-clamp-3 leading-relaxed font-medium prose prose-invert prose-sm prose-p:my-0 prose-headings:my-0 prose-headings:text-sm prose-headings:font-bold prose-ul:my-0 prose-li:my-0 max-w-none">
+                        <ReactMarkdown>{content || "No notes provided for this trade."}</ReactMarkdown>
+                    </div>
                 </div>
 
                 {/* Thumbnails & Footer */}

@@ -133,7 +133,7 @@ const FeesBreakdown = () => {
   }, [feeData]);
 
   if (isLoading) {
-    return <DashboardCardSkeleton title="Fees Breakdown" />;
+    return <DashboardCardSkeleton title="Fees Breakdown" className="h-[250px]" />;
   }
 
   if (analyticsError) {

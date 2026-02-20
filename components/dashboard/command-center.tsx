@@ -38,7 +38,7 @@ export function CommandCenter({
             <div className="absolute inset-0 bg-background/80 backdrop-blur-md border-b border-border/50 shadow-sm" />
             <div className="container mx-auto relative flex flex-col sm:flex-row items-center justify-between gap-4 py-3 px-4">
                 {/* Left: Brand or Context */}
-                <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-4">
+                <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-8">
                     <div className="flex flex-col">
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-muted-foreground uppercase tracking-widest font-semibold">

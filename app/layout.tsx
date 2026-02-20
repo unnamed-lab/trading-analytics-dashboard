@@ -1,3 +1,4 @@
+import "@/components/buffer-polyfill";
 import "./globals.css";
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono, Outfit } from "next/font/google";
@@ -42,7 +43,7 @@ export default function RootLayout({
         <div className="fixed inset-0 -z-10 bg-[linear-gradient(to_bottom,rgba(15,23,42,0.98),#0f172a)]" />
         <QueryProvider>
           <WalletProvider>
-              <AppShell>{children}</AppShell>
+            <AppShell>{children}</AppShell>
           </WalletProvider>
         </QueryProvider>
       </body>

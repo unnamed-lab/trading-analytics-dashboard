@@ -3,14 +3,15 @@
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { ChartSkeleton } from "@/components/ui/dashboard-states";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ReferenceLine } from "recharts";
 import { TradeFilters } from "@/types";
 import { cn } from "@/lib/utils";
 
 export function FeeWaterfall({ filters }: { filters?: TradeFilters }) {
-    const { data: analytics } = useTradeAnalytics(filters);
+    const { data: analytics, isLoading } = useTradeAnalytics(filters);
 
-    if (!analytics) return null;
+    if (isLoading || !analytics) return <ChartSkeleton />;
 
     const { totalPnL, totalFees, netPnL, totalFunding } = analytics.core;
 

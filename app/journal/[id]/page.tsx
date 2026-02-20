@@ -9,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MoodSelector } from "@/components/journal/mood-selector";
 import { ArrowLeft, History, Save, Trash2, Loader2, Sparkles, TrendingUp, TrendingDown, Target } from "lucide-react";
-import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatPnl, TradeRecord } from "@/types";
+import ReactMarkdown from "react-markdown";
+import Link from "next/link";
 
 interface JournalEntry {
   id: string;
@@ -29,6 +30,7 @@ interface JournalEntry {
   tags?: string[] | null;
   mood?: string | null;
   images?: string[] | null;
+  aiAnalyzed?: boolean | null;
 }
 
 export default function JournalDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -64,6 +66,7 @@ export default function JournalDetail({ params }: { params: Promise<{ id: string
   const [side, setSide] = useState<TradeRecord["side"] | "">("");
   const [pnl, setPnl] = useState("");
   const [pnlPct, setPnlPct] = useState("");
+  const [isEditing, setIsEditing] = useState(!item?.aiAnalyzed); // Default to view mode if it has AI analysis
 
   useEffect(() => {
     const found = list.data?.find((j: JournalEntry) => j.id === id);
@@ -88,6 +91,7 @@ export default function JournalDetail({ params }: { params: Promise<{ id: string
           setSide((j.side as any) || "");
           setPnl(j.pnl?.toString() || "");
           setPnlPct(j.pnlPercentage?.toString() || "");
+          setIsEditing(!j.aiAnalyzed);
         })
         .catch(() => { });
     }
@@ -118,12 +122,16 @@ export default function JournalDetail({ params }: { params: Promise<{ id: string
               <span className="text-[10px] font-mono font-bold text-muted-foreground/60 uppercase tracking-widest">
                 Journal Entry
               </span>
-              <Badge variant="outline" className="h-4 px-1.5 border-primary/20 bg-primary/5 text-primary text-[8px] font-bold gap-1">
-                <Sparkles className="w-2 h-2" /> AI ANALYZED
-              </Badge>
+              {item.aiAnalyzed && (
+                <Badge variant="outline" className="h-4 px-1.5 border-primary/20 bg-primary/5 text-primary text-[8px] font-bold gap-1">
+                  <Sparkles className="w-2 h-2" /> AI ANALYZED
+                </Badge>
+              )}
             </div>
             <span className="text-xs font-medium text-muted-foreground">
-              Created on {format(new Date(item.createdAt), "MMMM do, yyyy")}
+              Created on {item.createdAt && !isNaN(new Date(item.createdAt).getTime())
+                ? format(new Date(item.createdAt), "MMMM do, yyyy")
+                : "Unknown Date"}
             </span>
           </div>
         </div>
@@ -177,16 +185,32 @@ export default function JournalDetail({ params }: { params: Promise<{ id: string
 
             <div className="relative group">
               <div className="absolute -left-4 top-0 bottom-0 w-[1px] bg-primary/20 group-focus-within:bg-primary transition-colors" />
-              <div className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4 opacity-80 flex items-center gap-2">
-                <Target className="w-3 h-3" /> Trade Notes
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-[10px] font-black text-primary uppercase tracking-[0.2em] opacity-80 flex items-center gap-2">
+                  <Target className="w-3 h-3" /> Trade Notes
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsEditing(!isEditing)}
+                  className="h-6 text-[10px] uppercase font-bold tracking-widest text-muted-foreground hover:text-primary"
+                >
+                  {isEditing ? "View Details" : "Edit Notes"}
+                </Button>
               </div>
               <div className="bg-card/20 backdrop-blur-xl rounded-3xl border border-white/5 shadow-2xl p-1 min-h-[600px] transition-all hover:bg-card/30">
-                <textarea
-                  className="w-full h-full min-h-[600px] bg-transparent p-8 resize-none focus:outline-none leading-relaxed text-base text-foreground/90 font-medium placeholder:text-muted-foreground/20 custom-scrollbar"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Document your setup, execution, emotions, and key takeaways..."
-                />
+                {isEditing ? (
+                  <textarea
+                    className="w-full h-full min-h-[600px] bg-transparent p-8 resize-none focus:outline-none leading-relaxed text-base text-foreground/90 font-medium placeholder:text-muted-foreground/20 custom-scrollbar"
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    placeholder="Document your setup, execution, emotions, and key takeaways..."
+                  />
+                ) : (
+                  <div className="w-full h-full min-h-[600px] bg-transparent p-8 overflow-y-auto custom-scrollbar prose prose-invert prose-p:leading-relaxed prose-p:text-base prose-p:text-muted-foreground/90 prose-headings:text-foreground prose-a:text-primary max-w-none">
+                    <ReactMarkdown>{content}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             </div>
           </div>

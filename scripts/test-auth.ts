@@ -1,4 +1,4 @@
-import { verifySolanaSignature } from "./lib/solana-auth";
+import { verifySolanaSignature } from "../lib/solana-auth";
 import bs58 from "bs58";
 import nacl from "tweetnacl";
 

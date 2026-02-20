@@ -55,7 +55,7 @@ const TradeHistoryPage = () => {
       msgBytes = new Uint8Array(Buffer.from(messageB64, "base64"));
     }
     const signed = await signMessage(msgBytes as Uint8Array);
-    const sigBytes = (signed as { signature: Uint8Array })?.signature ?? signed;
+    const sigBytes = (signed as unknown as { signature: Uint8Array })?.signature ?? signed;
     return bs58.encode(Buffer.from(sigBytes));
   };
 

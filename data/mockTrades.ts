@@ -385,13 +385,14 @@ export const journals: Journal[] = [
   {
     id: "JRN-001",
     tradeId: "TRD-8921",
-    date: "2023-10-24 14:32",
+    owner: "mock-owner",
+    createdAt: "2023-10-24 14:32",
+    updatedAt: "2023-10-24 14:32",
     symbol: "SOL/USDC",
     side: "long",
     pnl: 420.5,
     pnlPercentage: 12.4,
-    notes:
-      "Breakout retest confirmation on the 4H timeframe. Saw increased volume on the retest candle and entered wi...",
+
     tags: [],
     aiAnalyzed: true,
     content:
@@ -400,13 +401,14 @@ export const journals: Journal[] = [
   {
     id: "JRN-002",
     tradeId: "TRD-8920",
-    date: "2023-10-24 11:15",
+    owner: "mock-owner",
+    createdAt: "2023-10-24 11:15",
+    updatedAt: "2023-10-24 11:15",
     symbol: "BTC/USDC",
     side: "short",
     pnl: -150.0,
     pnlPercentage: -2.1,
-    notes:
-      "Premature entry, didn't wait for the candle close. FOMO'd into the position because I thought I would...",
+
     tags: ["FOMO", "Early Entry"],
     aiAnalyzed: false,
     content:
@@ -415,13 +417,14 @@ export const journals: Journal[] = [
   {
     id: "JRN-003",
     tradeId: "TRD-8918",
-    date: "2023-10-23 09:12",
+    owner: "mock-owner",
+    createdAt: "2023-10-23 09:12",
+    updatedAt: "2023-10-23 09:12",
     symbol: "SOL/USDC",
     side: "short",
     pnl: 210.15,
     pnlPercentage: 5.8,
-    notes:
-      "Clean rejection at daily high. The price action was very clear, forming a double top pattern on the 15m chart...",
+
     tags: [],
     aiAnalyzed: true,
     content:
@@ -430,13 +433,14 @@ export const journals: Journal[] = [
   {
     id: "JRN-004",
     tradeId: "TRD-8919",
-    date: "2023-10-23 22:45",
+    owner: "mock-owner",
+    createdAt: "2023-10-23 22:45",
+    updatedAt: "2023-10-23 22:45",
     symbol: "ETH/USDC",
     side: "long",
     pnl: 85.4,
     pnlPercentage: 1.2,
-    notes:
-      "Scalp trade based on order flow. Saw absorption at the lows and decided to take a quick long. Exited early as...",
+
     tags: ["Scalp"],
     aiAnalyzed: false,
     content:
@@ -445,13 +449,14 @@ export const journals: Journal[] = [
   {
     id: "JRN-005",
     tradeId: "TRD-8917",
-    date: "2023-10-22 04:20",
+    owner: "mock-owner",
+    createdAt: "2023-10-22 04:20",
+    updatedAt: "2023-10-22 04:20",
     symbol: "BTC/USDC",
     side: "long",
     pnl: -840.0,
     pnlPercentage: -8.5,
-    notes:
-      "Hit full stop loss. Asian session fakeout. Thought it was a liquidity grab but price continued to dump....",
+
     tags: ["Stop Loss"],
     aiAnalyzed: false,
     content:

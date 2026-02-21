@@ -96,7 +96,7 @@ const AIInsights = ({
 
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-5 h-full">
+    <div className="rounded-lg border border-border bg-card p-4 sm:p-5 flex flex-col gap-4 sm:gap-5 h-full">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="rounded bg-primary px-2.5 py-1 text-xs font-bold tracking-wider text-primary-foreground uppercase">

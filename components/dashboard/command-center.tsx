@@ -29,9 +29,9 @@ export function CommandCenter({
     // Fallback if data is loading, ensuring layout doesn't jump too much
     if (isLoading || !analytics) {
         return (
-            <div className="w-full relative py-3.5 h-[76px] flex items-center">
+            <div className="w-full relative py-3.5 min-h-[76px] flex items-center">
                 <div className="absolute inset-0 bg-background/80 backdrop-blur-md border-b border-border/50 shadow-sm" />
-                <div className="container mx-auto relative flex items-center justify-between px-4">
+                <div className="container mx-auto relative flex items-center justify-between px-4 sm:px-6 lg:px-20">
                     <div className="flex gap-4 items-center">
                         <div className="h-10 w-32 bg-muted/50 rounded-lg animate-pulse" />
                         <div className="h-10 w-24 bg-muted/50 rounded-lg animate-pulse hidden sm:block" />
@@ -48,9 +48,9 @@ export function CommandCenter({
     const isProfitable = totalPnL >= 0;
 
     return (
-        <div className="w-full relative py-3.5">
+        <div className="w-full relative py-2 sm:py-3.5">
             <div className="absolute inset-0 bg-background/80 backdrop-blur-md border-b border-border/50 shadow-sm" />
-            <div className="container mx-auto relative flex flex-col sm:flex-row items-center justify-between gap-4 py-3 px-20">
+            <div className="container mx-auto relative flex flex-col sm:flex-row flex-wrap items-center sm:items-center justify-between gap-3 sm:gap-4 py-2 sm:py-3 px-4 sm:px-6 lg:px-20">
                 {/* Left: Brand or Context */}
                 <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-8">
                     <div className="flex flex-col">
@@ -127,7 +127,7 @@ export function CommandCenter({
                 </div>
 
                 {/* Right: Period Filter */}
-                <div className="flex items-center justify-between w-full sm:w-auto gap-2">
+                <div className="flex flex-wrap items-center justify-between sm:justify-end w-full sm:w-auto gap-2">
                     {filters?.symbol && (
                         <Badge
                             variant="secondary"

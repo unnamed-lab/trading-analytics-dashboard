@@ -137,11 +137,14 @@ Trade Details:
 - Fees Paid: $${(trade.fees?.total || 0).toFixed(6)}
 - Fee Impact: ${feeImpact}% of trade value
 
-${sessionContext?.recentTrades
+${sessionContext?.recentTrades?.length
         ? `
-Recent Performance Context:
-- Last 10 trades PnL: $${sessionContext.recentTrades.reduce((sum, t) => sum + (t.pnl || 0), 0).toFixed(2)}
-- Win rate last 10: ${((sessionContext.recentTrades.filter((t) => (t.pnl || 0) > 0).length / sessionContext.recentTrades.length) * 100).toFixed(1)}%
+Recent Performance Context (Last ${sessionContext.recentTrades.length} trades leading up to this one):
+- Previous Trades PnL: $${sessionContext.recentTrades.reduce((sum, t) => sum + (t.pnl || 0), 0).toFixed(2)}
+- Previous Win rate: ${((sessionContext.recentTrades.filter((t) => (t.pnl || 0) > 0).length / sessionContext.recentTrades.length) * 100).toFixed(1)}%
+
+Historical Trade Log (from oldest up to this trade):
+${[...sessionContext.recentTrades].reverse().map((t, i) => `[${i + 1}] ${t.symbol} ${t.side === "long" ? "LONG" : "SHORT"} @ $${t.entryPrice?.toFixed(4)} | PnL: $${(t.pnl || 0).toFixed(2)} (${(t.pnlPercentage || 0).toFixed(2)}%)`).join('\n')}
 `
         : ""
       }

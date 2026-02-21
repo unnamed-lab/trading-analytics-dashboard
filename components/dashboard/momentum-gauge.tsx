@@ -167,7 +167,7 @@ export function MomentumGauge({ filters: _propsFilters }: { filters?: TradeFilte
     // ── Render ────────────────────────────────────────────────────────────────
     return (
         <Card className="h-full col-span-1 border-border/50 bg-card/50 backdrop-blur-sm overflow-hidden flex flex-col">
-            <CardHeader className="pb-1 px-5 pt-5">
+            <CardHeader className="pb-1 px-4 sm:px-5 pt-4 sm:pt-5">
                 <div className="flex items-start justify-between gap-3">
                     <div>
                         <CardTitle className="text-sm font-semibold tracking-wide uppercase text-muted-foreground/70">

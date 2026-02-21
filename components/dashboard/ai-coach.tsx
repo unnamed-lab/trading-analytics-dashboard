@@ -91,8 +91,8 @@ export function AICoach() {
                     <BrainCircuit className="h-6 w-6 text-white animate-pulse" />
                 </Button>
             </SheetTrigger>
-            <SheetContent className="w-[400px] sm:w-[540px] flex flex-col border-l border-border">
-                <SheetHeader className="border-b pb-4 mb-4">
+            <SheetContent className="w-full sm:w-[540px] flex flex-col border-l border-border">
+                <SheetHeader className="border-b pb-4 mb-4 mt-8 sm:mt-0">
                     <SheetTitle className="flex items-center gap-2">
                         <BrainCircuit className="h-5 w-5 text-primary" />
                         AI Trading Coach

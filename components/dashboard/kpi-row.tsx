@@ -178,7 +178,7 @@ export default function KPIRow({
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })}`,
-      sub: `Realized: $${finalMetrics.totalPnl.toFixed(2)} | Unrealized: $${finalMetrics.unrealizedPnL.toFixed(2)}`,
+      sub: `Real: $${finalMetrics.totalPnl.toFixed(2)} | Unreal: $${finalMetrics.unrealizedPnL.toFixed(2)}`,
       icon: defaultIcons.total,
       positive: totalWithUnrealized >= 0,
     },

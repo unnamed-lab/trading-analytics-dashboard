@@ -27,6 +27,7 @@ import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
 import { useJournals } from "@/hooks/use-journals";
+import { useAllTrades, useMockTrades } from "@/hooks/use-trade-queries";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "../ui/button";
@@ -47,7 +48,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
     return null;
   }
 
-  const { publicKey, signMessage } = useWallet();
+  const { publicKey, signMessage, connected } = useWallet();
 
   const publicKeyStr = publicKey?.toBase58() ?? null;
 
@@ -77,6 +78,11 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
     signer,
     trade.id,
   );
+
+  const { data: realTrades = [] } = useAllTrades({ enabled: connected && !!publicKey, excludeFees: true });
+  const { data: mockTrades = [] } = useMockTrades({ enabled: !connected || process.env.NODE_ENV === "development" });
+  const allTrades = connected ? realTrades : mockTrades;
+  const perpTrades = allTrades.filter(t => t.discriminator === 19 || t.tradeType === "perp");
 
   const existing = list.data?.[0];
 
@@ -129,7 +135,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
       />
       <div className="relative h-full w-full bg-background/80 backdrop-blur-xl sm:w-110 lg:w-130 border-l border-border/50 shadow-2xl animate-slide-in-right flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border/40 bg-card/10">
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border/40 bg-card/10">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <Hash className="h-3.5 w-3.5 text-muted-foreground" />
@@ -167,9 +173,9 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
 
         <div className="flex-1 overflow-y-auto custom-scrollbar">
           {/* Profit Banner */}
-          <div className="px-6 pt-6">
+          <div className="px-4 sm:px-6 pt-4 sm:pt-6">
             <div
-              className={`relative rounded-2xl p-6 overflow-hidden border ${isProfitable
+              className={`relative rounded-2xl p-4 sm:p-6 overflow-hidden border ${isProfitable
                 ? "border-emerald-500/20 bg-emerald-500/5 shadow-[0_0_20px_rgba(16,185,129,0.05)]"
                 : "border-rose-500/20 bg-rose-500/5 shadow-[0_0_20px_rgba(244,63,94,0.05)]"
                 }`}
@@ -195,7 +201,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                     </span>
                   </div>
                   <div className="flex items-baseline gap-2">
-                    <span className={`text-4xl font-mono font-bold tracking-tighter ${isProfitable ? "text-emerald-500" : "text-rose-500"}`}>
+                    <span className={`text-3xl sm:text-4xl font-mono font-bold tracking-tighter ${isProfitable ? "text-emerald-500" : "text-rose-500"}`}>
                       {formatPnl(trade.pnl)}
                     </span>
                     <span className={`text-sm font-mono font-medium ${isProfitable ? "text-emerald-500/70" : "text-rose-500/70"}`}>
@@ -209,8 +215,8 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
           </div>
 
           {/* Execution Metrics */}
-          <div className="p-6 space-y-6">
-            <div className="grid grid-cols-2 gap-4">
+          <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
               <div className="bg-card/30 backdrop-blur-sm border border-border/40 rounded-xl p-4 transition-all hover:border-border/60">
                 <div className="flex items-center gap-2 mb-2">
                   <Target className="h-3.5 w-3.5 text-muted-foreground" />
@@ -376,7 +382,7 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
         </div>
 
         {/* Footer Actions */}
-        <div className="p-6 border-t border-border/40 bg-card/10 flex gap-4">
+        <div className="p-4 sm:p-6 border-t border-border/40 bg-card/10 flex flex-col sm:flex-row gap-3 sm:gap-4">
           <button
             onClick={async () => {
               try {
@@ -409,6 +415,9 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                       const encodedMessage = Buffer.from(message).toString("base64");
                       const signature = await signer(encodedMessage);
 
+                      const currentIndex = perpTrades.findIndex(t => t.id === trade.id);
+                      const recentTrades = currentIndex >= 0 ? perpTrades.slice(currentIndex + 1, currentIndex + 31) : [];
+
                       const response = await fetch("/api/ai/review", {
                         method: "POST",
                         headers: {
@@ -420,6 +429,9 @@ const TradeReviewPanel = ({ trade, onClose }: TradeReviewPanelProps) => {
                         body: JSON.stringify({
                           trade,
                           journalContent: journalContent || "No specific notes provided.",
+                          sessionContext: {
+                            recentTrades
+                          }
                         }),
                       });
 

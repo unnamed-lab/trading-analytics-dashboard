@@ -7,13 +7,34 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { BrainCircuit, TrendingUp, AlertTriangle, Target } from "lucide-react";
+import { BrainCircuit, TrendingUp, AlertTriangle, Target, Loader2, User, Send } from "lucide-react";
 import { useTradeAnalytics } from "@/hooks/use-trade-queries";
 import { cn } from "@/lib/utils";
+import { useWallet } from "@solana/wallet-adapter-react";
+import bs58 from "bs58";
+
+interface ChatMessage {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+}
 
 export function AICoach() {
     const { data: analytics } = useTradeAnalytics();
     const { core, risk, longShort } = analytics || {};
+    const { publicKey, signMessage } = useWallet();
+
+    const [messages, setMessages] = React.useState<ChatMessage[]>([]);
+    const [input, setInput] = React.useState("");
+    const [isLoading, setIsLoading] = React.useState(false);
+    const scrollRef = React.useRef<HTMLDivElement>(null);
+
+    // Auto-scroll to bottom
+    React.useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollIntoView({ behavior: "smooth" });
+        }
+    }, [messages, isLoading]);
 
     // Generate dynamic insights based on real data
     const insights = React.useMemo(() => {
@@ -81,6 +102,63 @@ export function AICoach() {
         return list;
     }, [analytics, core, risk, longShort]);
 
+    const handleSend = async () => {
+        if (!input.trim() || !publicKey || !signMessage || isLoading) return;
+
+        const userMsg = input.trim();
+        setInput("");
+        setMessages((prev) => [...prev, { id: Date.now().toString(), role: "user", content: userMsg }]);
+        setIsLoading(true);
+
+        try {
+            const messageStr = `Authenticate to Trade Analytics Dashboard\nTimestamp: ${Date.now()}`;
+            const encodedMessage = Buffer.from(messageStr).toString("base64");
+
+            let msgBytes: Uint8Array;
+            if (typeof window !== "undefined" && typeof window.atob === "function") {
+                const binary = window.atob(encodedMessage);
+                const arr = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+                msgBytes = arr;
+            } else {
+                const bin = Buffer.from(encodedMessage, "base64");
+                msgBytes = new Uint8Array(bin);
+            }
+
+            const signed = await signMessage(msgBytes as Uint8Array);
+            const signature = bs58.encode(Buffer.from((signed as any)?.signature ?? signed));
+
+            const payloadMessages = messages.map(m => ({ role: m.role, content: m.content }));
+
+            const res = await fetch("/api/ai/chat", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-solana-publickey": publicKey.toBase58(),
+                    "x-solana-signature": signature,
+                    "x-solana-message": encodedMessage,
+                },
+                body: JSON.stringify({
+                    prompt: userMsg,
+                    messages: payloadMessages,
+                    sessionContext: analytics,
+                }),
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: data.reply }]);
+            } else {
+                setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: "Sorry, I encountered an error connecting to my servers." }]);
+            }
+        } catch (e) {
+            console.error("Chat error:", e);
+            setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: "Something went wrong locally while sending your message." }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     return (
         <Sheet>
             <SheetTrigger asChild>
@@ -143,6 +221,44 @@ export function AICoach() {
                                     ))}
                                 </div>
                             )}
+
+                            {/* Chat Messages */}
+                            {messages.length > 0 && (
+                                <div className="mt-8 space-y-4">
+                                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+                                        Conversation
+                                    </h3>
+                                    {messages.map((m) => (
+                                        <div key={m.id} className={cn("flex gap-3", m.role === "user" ? "flex-row-reverse" : "flex-row")}>
+                                            <div className={cn("mt-0.5 shrink-0 h-8 w-8 rounded-full flex items-center justify-center border",
+                                                m.role === "user" ? "bg-primary/20 border-primary/30" : "bg-electric/20 border-electric/30"
+                                            )}>
+                                                {m.role === "user" ? <User className="h-4 w-4 text-primary" /> : <BrainCircuit className="h-4 w-4 text-electric" />}
+                                            </div>
+                                            <div className={cn("px-4 py-2.5 rounded-xl max-w-[80%] text-sm",
+                                                m.role === "user" ? "bg-primary/10 text-primary-foreground border-transparent" : "bg-card border border-border/50 text-foreground"
+                                            )}>
+                                                {m.content}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Loading Indicator */}
+                            {isLoading && (
+                                <div className="mt-4 flex gap-3 flex-row">
+                                    <div className="shrink-0 h-8 w-8 rounded-full flex items-center justify-center border bg-electric/20 border-electric/30">
+                                        <BrainCircuit className="h-4 w-4 text-electric animate-pulse" />
+                                    </div>
+                                    <div className="px-4 py-3 rounded-xl bg-card border border-border/50 flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce" style={{ animationDelay: "0ms" }} />
+                                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce" style={{ animationDelay: "150ms" }} />
+                                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce" style={{ animationDelay: "300ms" }} />
+                                    </div>
+                                </div>
+                            )}
+                            <div ref={scrollRef} className="h-4" />
                         </ScrollArea>
                     </div>
                 </div>
@@ -153,13 +269,21 @@ export function AICoach() {
                             type="text"
                             placeholder="Ask about your performance..."
                             className="w-full bg-muted/50 border border-input px-4 py-3 pr-10 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSend();
+                            }}
+                            disabled={isLoading || !publicKey}
                         />
                         <Button
                             size="icon"
                             variant="ghost"
-                            className="absolute right-1 top-1 h-8 w-8 text-muted-foreground hover:text-primary"
+                            className="absolute right-1 top-1 h-8 w-8 text-muted-foreground hover:text-primary disabled:opacity-50 transition-colors"
+                            onClick={handleSend}
+                            disabled={isLoading || !publicKey || !input.trim()}
                         >
-                            <BrainCircuit className="h-4 w-4" />
+                            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         </Button>
                     </div>
                     <p className="text-[10px] text-muted-foreground text-center mt-3">

@@ -12,6 +12,7 @@ import { FeeWaterfall } from "@/components/dashboard/fee-waterfall";
 import { MomentumGauge } from "@/components/dashboard/momentum-gauge";
 import KPIRow from "@/components/dashboard/kpi-row";
 import { AICoach } from "@/components/dashboard/ai-coach";
+// import AIInsights from "@/components/dashboard/ai-insights";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { DashboardProvider, useDashboard } from "@/components/dashboard/dashboard-provider";
@@ -71,6 +72,7 @@ function DashboardContent() {
 
           {/* Right Column Analysis */}
           <div className="space-y-6">
+            {/* <AIInsights /> */}
             <PerformanceMatrix filters={filters} />
             <FeeWaterfall filters={filters} />
             <FeesBreakdown /> {/* Keeping existing component as detailed view */}

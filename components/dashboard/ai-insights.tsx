@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { AlertTriangle, RefreshCw, ChevronRight, TrendingUp, Target } from "lucide-react";
-import { useTradeAnalytics, useCalculatedPnL } from "@/hooks/use-trade-queries";
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import {
   useBatchAITradeReviews,
   useGenerateAIReview,
@@ -13,6 +13,7 @@ import {
   DashboardCardSkeleton,
   DashboardError,
 } from "@/components/ui/dashboard-states";
+import TradeReviewPanel from "./trade-review-panel";
 
 interface AIInsightsProps {
   showDetailed?: boolean;
@@ -23,10 +24,9 @@ const AIInsights = ({
   showDetailed = false,
   onInsightClick,
 }: AIInsightsProps) => {
-  const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
+  const [selectedTrade, setSelectedTrade] = useState<any | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("");
-  const { data: analytics } = useTradeAnalytics();
-  const { data: pnlTrades } = useCalculatedPnL();
+  const { analytics, trades: pnlTrades } = useDashboard();
 
   useEffect(() => {
     setLastUpdated(new Date().toLocaleTimeString());
@@ -60,15 +60,8 @@ const AIInsights = ({
     refetch();
   };
 
-  const handleTradeSelect = async (trade: any) => {
-    setSelectedTradeId(trade.id);
-    await generateReview.mutateAsync({
-      trade,
-      journalContent: trade.notes || "No journal entry provided",
-      context: {
-        recentTrades: pnlTrades?.slice(0, 20),
-      },
-    });
+  const handleTradeSelect = (trade: any) => {
+    setSelectedTrade(trade);
   };
 
   const allInsights = [
@@ -184,6 +177,13 @@ const AIInsights = ({
             "Not financial advice. AI analysis for educational purposes only."}
         </div>
       </div>
+
+      {selectedTrade && (
+        <TradeReviewPanel
+          trade={selectedTrade}
+          onClose={() => setSelectedTrade(null)}
+        />
+      )}
     </div>
   );
 };
@@ -223,11 +223,13 @@ const InsightCard = ({
 
   return (
     <div
-      className={`flex gap-3 p-3 rounded-lg transition-colors ${onClick ? "cursor-pointer hover:bg-secondary/50" : ""
+      className={`group flex gap-4 p-4 rounded-xl transition-all border border-white/[0.05] bg-white/[0.02] shadow-sm ${onClick ? "cursor-pointer hover:bg-white/[0.04] hover:border-white/[0.1] hover:shadow-md hover:-translate-y-0.5" : ""
         }`}
       onClick={onClick}
     >
-      <Icon className={`h-5 w-5 shrink-0 mt-0.5 ${colors[variant].icon}`} />
+      <div className={`shrink-0 mt-0.5 h-8 w-8 rounded-full flex items-center justify-center border border-white/[0.05] ${colors[variant].badge}`}>
+        <Icon className={`h-4 w-4 ${colors[variant].icon}`} />
+      </div>
       <div className="flex-1">
         <div className="flex items-center gap-2 mb-1">
           <h4 className="font-semibold text-sm text-foreground">{title}</h4>
@@ -239,10 +241,15 @@ const InsightCard = ({
             </span>
           )}
         </div>
-        <p className="text-sm text-muted-foreground leading-relaxed">
+        <p className="text-sm text-muted-foreground/80 leading-relaxed mt-1">
           {description}
         </p>
       </div>
+      {onClick && (
+        <div className="flex items-center justify-center shrink-0 opacity-0 -ml-2 group-hover:opacity-100 group-hover:ml-0 transition-all duration-300">
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </div>
+      )}
     </div>
   );
 };

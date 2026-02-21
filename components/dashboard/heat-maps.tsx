@@ -317,8 +317,11 @@ export function HeatMaps({ filters: _propsFilters }: { filters?: TradeFilters })
                                             panelColors={PANEL_COLORS}
                                             rectProps={{ rx: 2.5, ry: 2.5 }}
                                             rectRender={(props, data) => {
-                                                const item = data as typeof data & { pnl: number };
-                                                const hasTrade = item.pnl !== undefined && item.count !== 0;
+                                                // react-heat-map uses YYYY/MM/DD internal format for data.date
+                                                const normalizedDate = data.date.replace(/\//g, "-");
+                                                const pnl = dailyPnl.get(normalizedDate);
+                                                const hasTrade = pnl !== undefined;
+
                                                 return (
                                                     <Tooltip key={data.date}>
                                                         <TooltipTrigger asChild>
@@ -338,11 +341,11 @@ export function HeatMaps({ filters: _propsFilters }: { filters?: TradeFilters })
                                                                 </span>
                                                                 {hasTrade ? (
                                                                     <span
-                                                                        className={`font-mono font-semibold tabular-nums ${item.pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                                                                        className={`font-mono font-semibold tabular-nums ${pnl! >= 0 ? "text-emerald-400" : "text-rose-400"
                                                                             }`}
                                                                     >
-                                                                        {item.pnl >= 0 ? "+" : "−"}$
-                                                                        {Math.abs(item.pnl).toFixed(2)}
+                                                                        {pnl! >= 0 ? "+" : "−"}$
+                                                                        {Math.abs(pnl!).toFixed(2)}
                                                                     </span>
                                                                 ) : (
                                                                     <span className="text-muted-foreground/60 italic">No trades</span>

@@ -78,19 +78,33 @@ const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export function MomentumGauge({ filters: _propsFilters }: { filters?: TradeFilters }) {
-    const { trades, isLoading } = useDashboard();
+    const { trades, filters, isLoading } = useDashboard();
 
     const [displayAngle, setDisplayAngle] = useState(0); // start at leftmost (score=0)
     const animRef = useRef<number | null>(null);
     const prevAngleRef = useRef(0);
 
+    // Dynamic target based on timeframe
+    const targetCount = useMemo(() => {
+        const period = filters?.period || "7D";
+        switch (period) {
+            case "24H": return 10;
+            case "7D": return 25;
+            case "30D": return 50;
+            case "90D": return 100;
+            case "YTD": return 100;
+            case "ALL": return 100;
+            default: return 50;
+        }
+    }, [filters?.period]);
+
     // ── Analytics ──────────────────────────────────────────────────────────────
     const analytics = useMemo(() => {
         if (!trades || trades.length === 0) {
-            return { score: 50, statusKey: "nodata", recentWinRate: 0, avgPnL: 0, consistency: 0 };
+            return { score: 50, statusKey: "nodata", recentWinRate: 0, avgPnL: 0, consistency: 0, tradeCountUsed: 0 };
         }
 
-        const recent = trades.slice(0, 50);
+        const recent = trades.slice(0, targetCount);
         const n = recent.length;
         let wins = 0, gains = 0, losses = 0, totalPnL = 0;
 
@@ -118,8 +132,8 @@ export function MomentumGauge({ filters: _propsFilters }: { filters?: TradeFilte
         else if (score <= 30) statusKey = "coolingdown";
         else if (score <= 40) statusKey = "sideways";
 
-        return { score, statusKey, recentWinRate: winRate, avgPnL, consistency };
-    }, [trades]);
+        return { score, statusKey, recentWinRate: winRate, avgPnL, consistency, tradeCountUsed: n };
+    }, [trades, targetCount]);
 
     // ── Animate needle to target angle ────────────────────────────────────────
     const animateTo = useCallback((targetAngle: number) => {
@@ -174,7 +188,9 @@ export function MomentumGauge({ filters: _propsFilters }: { filters?: TradeFilte
                             Momentum Gauge
                         </CardTitle>
                         <CardDescription className="text-base font-medium text-foreground mt-0.5">
-                            Last 50 trades
+                            {analytics.tradeCountUsed > 0
+                                ? `Based on ${analytics.tradeCountUsed} trade${analytics.tradeCountUsed !== 1 ? 's' : ''}`
+                                : "Awaiting trades"}
                         </CardDescription>
                     </div>
 

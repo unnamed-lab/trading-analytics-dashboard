@@ -151,10 +151,10 @@ const useRawTrades = (options?: { excludeFees?: boolean }) => {
       return fetcher.getCachedTrades({ fees: options?.excludeFees });
     },
     enabled: !!publicKey,
-    staleTime: 5 * 60 * 1000, // 5 minutes raw cache
+    staleTime: 30 * 1000, // 30 seconds raw cache
     gcTime: 60 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 };
 
@@ -175,7 +175,7 @@ export const useAllTrades = (options?: {
   // Memoize the filtered result
   const filteredTrades = useMemo(() => {
     let sorted = [...rawTrades].sort(
-      (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
     );
 
     if (options?.filters && fetcher.filterTrades) {

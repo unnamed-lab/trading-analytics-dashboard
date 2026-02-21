@@ -21,7 +21,7 @@ export function CommandCenter({
     onFilterChange
 }: CommandCenterProps) {
     // Pass the active period to the hook to filter data
-    const { analytics, isFetching, isLoading, currentPrices } = useDashboard();
+    const { analytics, isFetching, isLoading, currentPrices, refetchTrades } = useDashboard();
     const solPrice = currentPrices.get("SOL");
 
     const periods = ["24H", "7D", "30D", "ALL"];
@@ -58,8 +58,12 @@ export function CommandCenter({
                             <span className="text-xs text-muted-foreground uppercase tracking-widest font-semibold">
                                 Net PnL
                             </span>
-                            {isFetching && (
+                            {isFetching ? (
                                 <RefreshCw className="w-3 h-3 text-muted-foreground animate-spin" />
+                            ) : (
+                                <button onClick={() => refetchTrades()} title="Refresh Trades" className="hover:text-primary transition-colors focus:outline-none focus:ring-1 focus:ring-primary rounded">
+                                    <RefreshCw className="w-3 h-3 text-muted-foreground" />
+                                </button>
                             )}
                         </div>
 

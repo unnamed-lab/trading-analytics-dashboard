@@ -57,17 +57,37 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
     // 2. Local State: We maintain prices for analytics
     const [currentPrices, setCurrentPrices] = useState<Map<string, number>>(new Map());
 
-    // Fetch prices once when provider mounts
+    // Fetch prices periodically (every 30 seconds)
     React.useEffect(() => {
-        fetcher?.fetchCurrentPrices().then(setCurrentPrices).catch(console.error);
+        if (!fetcher) return;
+
+        const updatePrices = () => {
+            fetcher.fetchCurrentPrices().then(setCurrentPrices).catch(console.error);
+        };
+
+        // Initial fetch
+        updatePrices();
+
+        // Set interval for subsequent fetches
+        const intervalId = setInterval(updatePrices, 30000);
+
+        return () => clearInterval(intervalId);
     }, [fetcher]);
 
     // 3. Centralized Analytics Computation: Run once when trades/filters change
     const analytics = useMemo(() => {
         if (!trades.length && !financials) return null;
-        const calculator = new TradeAnalyticsCalculator(trades, financials);
+
+        // If a timeframe is active, we don't want to use the global 'financials' 
+        // because it contains all-time totals and ruins period filters.
+        const isTimePeriodActive = filters.period && filters.period !== "ALL";
+
+        const calculator = new TradeAnalyticsCalculator(
+            trades,
+            isTimePeriodActive ? undefined : financials
+        );
         return calculator.generateFullReport(currentPrices);
-    }, [trades, financials, currentPrices]);
+    }, [trades, financials, currentPrices, filters.period]);
 
     const value = {
         filters,

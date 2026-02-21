@@ -641,6 +641,9 @@ export class TransactionDataFetcher {
 
     if (filters.period) {
       switch (filters.period) {
+        case "24H":
+          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          break;
         case "7D":
           startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
           break;

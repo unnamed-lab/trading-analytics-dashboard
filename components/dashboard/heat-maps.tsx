@@ -101,7 +101,7 @@ export function HeatMaps({ filters: _propsFilters }: { filters?: TradeFilters })
         const start = new Date();
         const period = filters?.period;
 
-        if (period === "7D" || period === "30D") {
+        if (period === "24H" || period === "7D" || period === "30D") {
             start.setMonth(end.getMonth() - 3);
         } else if (period === "90D" || period === "YTD") {
             start.setMonth(0);

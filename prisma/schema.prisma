@@ -40,3 +40,57 @@ model Journal {
   @@index([tradeId])
 }
 
+model WalletSyncState {
+  id            String   @id @default(cuid())
+  owner         String   @unique // wallet address
+  lastSignature String?  
+  lastSyncedAt  DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([owner])
+}
+
+model Trade {
+  id              String   @id // uniqueId (signature-index)
+  owner           String   // Wallet address
+  timestamp       DateTime
+  section         String?
+  symbol          String
+  side            String
+  entryPrice      Float
+  exitPrice       Float
+  quantity        Float
+  amount          Float?
+  value           Float?
+  orderType       String?  
+  instrument      String?
+  clientId        String
+  orderId         String
+  transactionHash String
+  
+  // Fees flattened
+  makerFee        Float?   @default(0)
+  takerFee        Float?   @default(0)
+  totalFee        Float    @default(0)
+  rebates         Float?   @default(0)
+  fundingFee      Float?   @default(0)
+  socializedLossFee Float? @map("socializedLoss") @default(0)
+  
+  // Basic properties
+  pnl             Float    @default(0)
+  pnlPercentage   Float    @default(0)
+  duration        Float    @default(0)
+  status          String   @default("breakeven")
+  
+  notes           String?
+  tradeType       String?
+  fundingPayments Float?
+  logType         String?
+  discriminator   Int?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([owner])
+  @@index([owner, timestamp(sort: Desc)])
+}

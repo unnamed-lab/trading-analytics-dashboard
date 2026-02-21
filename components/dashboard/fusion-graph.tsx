@@ -2,7 +2,7 @@
 
 import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import { ChartSkeleton } from "@/components/ui/dashboard-states";
 import {
     ResponsiveContainer,
@@ -18,18 +18,25 @@ import {
 import { TradeFilters } from "@/types";
 import { format } from "date-fns";
 
-export function FusionGraph({ filters }: { filters?: TradeFilters }) {
-    const { data: analytics, isLoading } = useTradeAnalytics(filters);
+export function FusionGraph({ filters: _propsFilters }: { filters?: TradeFilters }) {
+    const { analytics, isLoading } = useDashboard();
 
     const data = useMemo(() => {
         if (!analytics) return [];
         const { drawdown, timeSeries } = analytics;
 
+        // Sort timeSeries by timestamp to ensure correct processing
+        const sortedTimeSeries = [...timeSeries].sort((a, b) => a.timestamp - b.timestamp);
+
+        // Down-sample for large datasets (max 50 points for clarity on small graphs)
+        const step = Math.max(1, Math.floor(sortedTimeSeries.length / 50));
+        const sampledTimeSeries = sortedTimeSeries.filter((_: any, i: number) => i % step === 0 || i === sortedTimeSeries.length - 1);
+
         // Merge PnL and Drawdown data
-        return timeSeries.map((item) => {
+        return sampledTimeSeries.map((item) => {
             // Find matching drawdown point (approximate by timestamp)
             const ddPoint = drawdown.drawdownSeries.find(
-                (d) => Math.abs(d.timestamp - item.timestamp) < 1000 * 60 * 60 * 24 // within 24h
+                (d: any) => Math.abs(d.timestamp - item.timestamp) < 1000 * 60 * 60 * 24 // within 24h
             );
 
             return {

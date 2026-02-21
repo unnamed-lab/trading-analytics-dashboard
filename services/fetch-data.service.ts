@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import "dotenv/config";
 import { Signature, address, createSolanaRpc, devnet } from "@solana/kit";
 import { PublicKey, Connection } from "@solana/web3.js";
 import {
@@ -18,6 +17,7 @@ import {
 import EngineAdapter from "@/lib/deriverse-engine-adapter";
 import { TradeRecord, FinancialDetails } from "@/types";
 import { PnLCalculator } from "@/services/pnl-calculator.service";
+import { getTradesAction, getLastSignatureAction, upsertTradesAction, updateLastSignatureAction } from "@/app/actions/trade-actions";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -177,159 +177,131 @@ export class TransactionDataFetcher {
     }
   }
 
+  /**
+   * Sync newest trades from chain to the database and return the full unified list
+   */
+  async syncTradesToDb(): Promise<TradeRecord[]> {
+    if (!this.walletPublicKey) throw new Error("Wallet not initialized");
+    const owner = this.walletPublicKey.toString();
+
+    console.log("\n🔄 Synchronizing trades with database...");
+
+    // 1. Get cached trades & last signature
+    const cachedTrades = await getTradesAction(owner);
+    const lastSignature = await getLastSignatureAction(owner);
+
+    console.log(`✅ Loaded ${cachedTrades.length} cached trades. Last synced signature: ${lastSignature || 'None'}`);
+
+    // 2. Fetch new signatures
+    let signaturesResponse: any;
+    try {
+      const fetchOptions: any = { limit: this.maxTransactions };
+      if (lastSignature) fetchOptions.until = lastSignature;
+
+      signaturesResponse = await this.fetchWithRetries(() =>
+        this.rpc.getSignaturesForAddress(address(owner), fetchOptions).send()
+      );
+    } catch (err: any) {
+      console.warn(`⚠️ Failed to fetch new signatures: ${err.message}`);
+      const tradesWithPnL = this.applyPnL(cachedTrades);
+      return tradesWithPnL.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    }
+
+    const signatures = Array.isArray(signaturesResponse)
+      ? signaturesResponse
+      : signaturesResponse?.value || [];
+
+    if (!signatures.length) {
+      console.log(`✅ No new transactions since last sync.`);
+      const tradesWithPnL = this.applyPnL(cachedTrades);
+      return tradesWithPnL.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    }
+
+    console.log(`✅ Found ${signatures.length} NEW transactions to process`);
+
+    // Process new transactions
+    await this.primeClientData();
+    const relevantTransactions = await this.filterProgramSignatures(signatures);
+    await this.primeClientData();
+    const newRawTrades = await this.processSignatures(relevantTransactions);
+
+    // Combine and apply PnL
+    const combinedRaw = [...newRawTrades, ...cachedTrades];
+    const tradesWithPnL = this.applyPnL(combinedRaw);
+
+    // Upsert to DB
+    if (newRawTrades.length > 0) {
+      console.log(`💾 Caching ${tradesWithPnL.length} updated trades to database...`);
+      await upsertTradesAction(owner, tradesWithPnL);
+    }
+
+    // Update last signature if we got any new signatures
+    if (signatures.length > 0) {
+      await updateLastSignatureAction(owner, signatures[0].signature);
+    }
+
+    return tradesWithPnL.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }
+
   // ── public fetch methods ─────────────────────────────────────────────────
 
   async fetchTransactionsPaginated(
     options: PaginationOptions = {},
   ): Promise<FetchResult> {
-    if (!this.walletPublicKey) throw new Error("Wallet not initialized");
-
+    const allTrades = await this.syncTradesToDb();
     const limit = options.limit || 100;
-    console.log("\n📊 Fetching transactions (paginated)...");
-    console.log(`   Limit: ${limit}`);
-    if (options.before) console.log(`   Before: ${options.before}`);
-    if (options.until) console.log(`   Until: ${options.until}`);
 
-    try {
-      const requestOptions: any = { limit };
-      if (options.before) requestOptions.before = options.before as any;
-      if (options.until) requestOptions.until = options.until as any;
-
-      let signaturesResponse: any;
-      try {
-        console.log("\n🔍 Fetching signatures for wallet...");
-        signaturesResponse = await this.fetchWithRetries(() =>
-          this.rpc
-            .getSignaturesForAddress(
-              address(this.walletPublicKey!.toString()),
-              requestOptions,
-            )
-            .send(),
-        );
-      } catch (err1: any) {
-        console.log("⚠️  Failed to fetch signatures");
-        console.error(`  Error: ${err1.message}`);
-        return { trades: [], hasMore: false, totalProcessed: 0 };
+    let startIndex = 0;
+    if (options.before) {
+      // Find the trade that matches options.before, and start AFTER it
+      const beforeIndex = allTrades.findIndex((t) => t.transactionHash === options.before);
+      if (beforeIndex !== -1) {
+        startIndex = beforeIndex + 1;
+      } else {
+        startIndex = allTrades.length; // Not found, return empty
       }
-
-      await this.primeClientData();
-
-      const signatures = Array.isArray(signaturesResponse)
-        ? signaturesResponse
-        : signaturesResponse?.value || [];
-
-      if (!signatures.length) {
-        console.log("❌ No transactions found");
-        return { trades: [], hasMore: false, totalProcessed: 0 };
-      }
-
-      console.log(`✅ Found ${signatures.length} transactions`);
-
-      const relevantTransactions =
-        await this.filterProgramSignatures(signatures);
-      console.log(
-        `\n📊 Found ${relevantTransactions.length} program-related transactions out of ${signatures.length}`,
-      );
-
-      await this.primeClientData();
-
-      const rawTrades = await this.processSignatures(relevantTransactions);
-
-      // ── Apply PnL calculation across all collected trades ──────────────
-      const tradesWithPnL = this.applyPnL(rawTrades);
-
-      const hasMore = signatures.length >= limit;
-      const lastSignature =
-        signatures.length > 0
-          ? signatures[signatures.length - 1].signature
-          : undefined;
-
-      return {
-        trades: tradesWithPnL.sort(
-          (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
-        ),
-        hasMore,
-        lastSignature,
-        totalProcessed: relevantTransactions.length,
-      };
-    } catch (error: any) {
-      console.error("Error fetching transactions:", error.message);
-      throw error;
     }
+
+    let endIndex = allTrades.length;
+    if (options.until) {
+      // Stop before the trade that matches options.until (since we want trades newer than until)
+      // Actually, allTrades is sorted descending. "until" means stop when we reach it.
+      // So if we are returning a slice, the end of the slice should be the index of "until".
+      const untilIndex = allTrades.findIndex((t) => t.transactionHash === options.until);
+      if (untilIndex !== -1) {
+        endIndex = untilIndex;
+      }
+    }
+
+    // Ensure endIndex is not before startIndex
+    endIndex = Math.max(startIndex, endIndex);
+
+    // Apply limit
+    const paginated = allTrades.slice(startIndex, Math.min(startIndex + limit, endIndex));
+
+    // hasMore depends on whether we hit the limit, AND whether there are more trades available within bounds
+    const hasMore = paginated.length === limit && startIndex + limit < endIndex;
+
+    const lastSignature = paginated.length > 0 ? paginated[paginated.length - 1].transactionHash : undefined;
+
+    return {
+      trades: paginated,
+      hasMore,
+      lastSignature,
+      totalProcessed: paginated.length,
+    };
   }
 
   async fetchAllTransactions({
     fees,
   }: { fees?: boolean } | undefined = {}): Promise<TradeRecord[]> {
-    if (!this.walletPublicKey) {
-      console.warn("Wallet not initialized");
-      return [];
-    }
+    const allTrades = await this.syncTradesToDb();
 
-    console.log("\n📊 Fetching all transactions...");
-    console.log(`   Max transactions: ${this.maxTransactions}`);
-
-    try {
-      let signaturesResponse: any;
-      try {
-        console.log("\n🔍 Method 1: Fetching signatures for wallet...");
-        signaturesResponse = await this.fetchWithRetries(() =>
-          this.rpc
-            .getSignaturesForAddress(address(this.walletPublicKey!.toString()), {
-              limit: this.maxTransactions,
-            })
-            .send(),
-        );
-      } catch (err1: any) {
-        console.log("⚠️  Method 1 failed, trying with program ID...");
-        try {
-          signaturesResponse = await this.fetchWithRetries(() =>
-            this.rpc
-              .getSignaturesForAddress(address(this.programId), {
-                limit: this.maxTransactions,
-              })
-              .send(),
-          );
-        } catch (err2: any) {
-          console.error("❌ Both methods failed:");
-          console.error(`  Method 1 error: ${err1.message}`);
-          console.error(`  Method 2 error: ${err2.message}`);
-          return [];
-        }
-      }
-
-      const signatures = Array.isArray(signaturesResponse)
-        ? signaturesResponse
-        : signaturesResponse?.value || [];
-
-      if (!signatures.length) {
-        console.log("❌ No transactions found");
-        return [];
-      }
-
-      console.log(`✅ Found ${signatures.length} transactions`);
-      const relevantTransactions =
-        await this.filterProgramSignatures(signatures);
-      console.log(
-        `\n📊 Processing ${relevantTransactions.length} program-related transactions...`,
-      );
-
-      const rawTrades = await this.processSignatures(relevantTransactions);
-
-      // ── Apply PnL calculation ──────────────────────────────────────────
-      const tradesWithPnL = this.applyPnL(rawTrades);
-
-      return tradesWithPnL
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-        .filter((t) =>
-          fees
-            ? true
-            : !t.logType?.includes("Fees") || !t.orderType?.includes("fee"),
-        );
-    } catch (error: any) {
-      console.error("Error fetching transactions:", error.message);
-      throw error;
-    }
+    return allTrades.filter((t) =>
+      fees
+        ? true
+        : !t.logType?.includes("Fees") || !t.orderType?.includes("fee"),
+    );
   }
 
   /**
@@ -755,58 +727,50 @@ export class TransactionDataFetcher {
     "perpSocLoss",
   ]);
 
-  /** Run PnLCalculator over fill records; preserve pnl for fee/funding/loss records. */
   private applyPnL(trades: TradeRecord[]): TradeRecord[] {
     if (!trades.length) return trades;
 
-    // Partition: fills go through PnLCalculator; the rest keep their inline pnl.
-    const fillIndices: number[] = [];
     const fillTrades: TradeRecord[] = [];
 
-    trades.forEach((t, i) => {
+    trades.forEach((t) => {
       if (!TransactionDataFetcher.FIXED_PNL_LOG_TYPES.has(t.logType ?? "")) {
-        fillIndices.push(i);
         fillTrades.push(t);
       }
     });
 
-    // Clone the original array so we can splice results back in.
+    // Create a new array, matching originally mapped PnL values by `id` directly
     const result: TradeRecord[] = trades.map((t) => ({ ...t }));
 
-    // Apply PnL calculator only to fill-type records.
     if (fillTrades.length) {
       try {
         const calc = new PnLCalculator(fillTrades);
         const withPnL = calc.calculatePnL();
 
-        withPnL.forEach((t, idx) => {
-          const originalIdx = fillIndices[idx];
-          result[originalIdx] = {
-            ...t,
-            pnlPercentage: this.computePnlPercentage(t),
-            status: this.pnlToStatus(t.pnl),
-          };
+        // Match computed PnL by id instead of original index
+        const pnlMap = new Map<string, TradeRecord>();
+        withPnL.forEach(t => pnlMap.set(t.id, t));
+
+        result.forEach((t, i) => {
+          if (pnlMap.has(t.id)) {
+            const matched = pnlMap.get(t.id)!;
+            result[i] = {
+              ...t,
+              pnl: matched.pnl,
+              pnlPercentage: this.computePnlPercentage(matched),
+              status: this.pnlToStatus(matched.pnl),
+            };
+          }
         });
       } catch (err: any) {
         console.warn(`⚠️ PnL calculation failed: ${err.message}`);
-        // Fallback: leave fill records as-is but still fix status + percentage.
-        fillIndices.forEach((originalIdx) => {
-          const t = result[originalIdx];
-          result[originalIdx] = {
-            ...t,
-            pnlPercentage: this.computePnlPercentage(t),
-            status: this.pnlToStatus(t.pnl),
-          };
-        });
       }
     }
 
     // Always recompute pnlPercentage and status for fixed-pnl records too.
-    trades.forEach((_, i) => {
+    result.forEach((t, i) => {
       if (
-        TransactionDataFetcher.FIXED_PNL_LOG_TYPES.has(trades[i].logType ?? "")
+        TransactionDataFetcher.FIXED_PNL_LOG_TYPES.has(t.logType ?? "")
       ) {
-        const t = result[i];
         result[i] = {
           ...t,
           pnlPercentage: this.computePnlPercentage(t),

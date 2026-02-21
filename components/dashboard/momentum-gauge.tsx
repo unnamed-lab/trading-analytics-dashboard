@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { useAllTrades } from "@/hooks/use-trade-queries";
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import { cn } from "@/lib/utils";
 import { GaugeSkeleton } from "@/components/ui/dashboard-states";
 import { TradeFilters } from "@/types";
@@ -77,8 +77,8 @@ const STATUS_CONFIG: Record<
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
-    const { data: trades, isLoading } = useAllTrades({ filters });
+export function MomentumGauge({ filters: _propsFilters }: { filters?: TradeFilters }) {
+    const { trades, isLoading } = useDashboard();
 
     const [displayAngle, setDisplayAngle] = useState(0); // start at leftmost (score=0)
     const animRef = useRef<number | null>(null);
@@ -106,7 +106,7 @@ export function MomentumGauge({ filters }: { filters?: TradeFilters }) {
 
         // Consistency: inverse coefficient of variation
         const avgPnL = totalPnL / n;
-        const variance = recent.reduce((s, { pnl = 0 }) => s + (pnl - avgPnL) ** 2, 0) / n;
+        const variance = recent.reduce((s: number, { pnl = 0 }) => s + (pnl - avgPnL) ** 2, 0) / n;
         const cv = avgPnL === 0 ? 1 : Math.sqrt(variance) / (Math.abs(avgPnL) || 1);
         const consistency = Math.round(Math.max(0, Math.min(100, 100 - cv * 20)));
 

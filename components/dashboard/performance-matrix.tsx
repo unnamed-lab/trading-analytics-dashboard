@@ -4,13 +4,13 @@ import React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import { DashboardCardSkeleton } from "@/components/ui/dashboard-states";
 import { cn } from "@/lib/utils";
 import { TradeFilters } from "@/types";
 
-export function PerformanceMatrix({ filters }: { filters?: TradeFilters }) {
-    const { data: analytics, isLoading } = useTradeAnalytics(filters);
+export function PerformanceMatrix({ filters: _propsFilters }: { filters?: TradeFilters }) {
+    const { analytics, isLoading } = useDashboard();
 
     if (isLoading || !analytics) return <DashboardCardSkeleton title="Performance Matrix" />;
 

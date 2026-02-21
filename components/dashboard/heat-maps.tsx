@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import { GridSkeleton, KPISkeleton } from "@/components/ui/dashboard-states";
 import {
     ResponsiveContainer,
@@ -50,12 +50,12 @@ const LEGEND_ITEMS = [
     { label: "Big win", color: PANEL_COLORS[15] },
 ];
 
-export function HeatMaps({ filters }: { filters?: TradeFilters }) {
-    const { data: analytics, isLoading } = useTradeAnalytics(filters);
+export function HeatMaps({ filters: _propsFilters }: { filters?: TradeFilters }) {
+    const { analytics, isLoading, filters } = useDashboard();
     const cardRef = useRef<HTMLDivElement>(null);
     // Ref placed directly on the heatmap container — measures the exact available width.
     const scrollContainerRef = useRef<HTMLDivElement>(null);
-    const [containerWidth, setContainerWidth] = useState(0);
+    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
     // Track viewport width safely (avoids SSR crash)
     const [viewportWidth, setViewportWidth] = useState(1024);
 
@@ -78,13 +78,13 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
         if (dailyPnl.size === 0) return [];
 
         let maxAbsPnl = 0;
-        dailyPnl.forEach((pnl) => {
+        dailyPnl.forEach((pnl: number) => {
             const abs = Math.abs(pnl);
             if (abs > maxAbsPnl) maxAbsPnl = abs;
         });
         if (maxAbsPnl === 0) maxAbsPnl = 100;
 
-        return Array.from(dailyPnl.entries()).map(([dateStr, pnl]) => {
+        return Array.from(dailyPnl.entries() as IterableIterator<[string, number]>).map(([dateStr, pnl]) => {
             let intensity = 0;
             const ratio = Math.abs(pnl) / maxAbsPnl;
             const level = Math.max(1, Math.min(5, Math.ceil(ratio * 5)));
@@ -117,11 +117,11 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
         return { startDate: start, endDate: end };
     }, [filters?.period]);
 
-    // Measure the heatmap container — no padding arithmetic needed.
+    // Measure the heatmap container for both width and height
     useEffect(() => {
         const el = scrollContainerRef.current;
         if (!el) return;
-        const update = () => setContainerWidth(el.clientWidth);
+        const update = () => setContainerSize({ width: el.clientWidth, height: el.clientHeight });
         update();
         const observer = new ResizeObserver(update);
         observer.observe(el);
@@ -137,18 +137,27 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
      * - `cellSpace`     fixed at 2 px (tight but readable).
      */
     const { heatmapWidth, rectSize, cellSpace } = useMemo(() => {
-        const width = containerWidth || 400;
+        const width = containerSize.width || 500;
+        const height = containerSize.height || 200;
+
         const diffDays = Math.ceil((endDate.getTime() - startDate.getTime()) / 86_400_000);
         const weeks = Math.ceil(diffDays / 7);
         // ~50 px for the day-of-week label column rendered on the left by the library
         const DAY_LABEL_WIDTH = 50;
-        const available = width - DAY_LABEL_WIDTH;
-        const sp = 2;
-        // Solve: weeks * (rs + sp) = available  →  rs = available/weeks - sp
-        const computed = Math.floor(available / weeks - sp);
-        const rs = Math.min(13, Math.max(8, computed));
+        const availableWidth = width - DAY_LABEL_WIDTH;
+        // ~25 px for the month labels on top
+        const availableHeight = height - 25;
+
+        const sp = 3; // tighter space allows larger boxes that are easier to see
+
+        const computedW = Math.floor(availableWidth / Math.max(1, weeks) - sp);
+        const computedH = Math.floor(availableHeight / 7 - sp);
+
+        const computed = Math.min(computedW, computedH);
+
+        const rs = Math.min(25, Math.max(8, computed));
         return { heatmapWidth: width, rectSize: rs, cellSpace: sp };
-    }, [startDate, endDate, containerWidth]);
+    }, [startDate, endDate, containerSize]);
 
     // ── Skeleton ──────────────────────────────────────────────────────────────
     if (isLoading || !analytics) {
@@ -244,7 +253,7 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
                                     />
 
                                     <Bar dataKey="pnl" radius={[3, 3, 0, 0]} maxBarSize={18}>
-                                        {hourly.map((entry, i) => (
+                                        {hourly.map((entry: any, i: number) => (
                                             <Cell
                                                 key={`cell-${i}`}
                                                 fill={entry.pnl >= 0 ? "url(#gradWin)" : "url(#gradLoss)"}
@@ -282,11 +291,12 @@ export function HeatMaps({ filters }: { filters?: TradeFilters }) {
                                 */}
                                 <div
                                     ref={scrollContainerRef}
-                                    className="w-full overflow-hidden pb-1 flex-1"
-                                    style={{ minHeight: 160 }}
+                                    className="w-full overflow-y-auto pb-1 flex-1"
+                                    style={{ minHeight: 180 }}
                                 >
-                                    <div style={{ width: heatmapWidth, paddingTop: 4, height: "100%" }}>
+                                    <div style={{ width: heatmapWidth, paddingTop: 4, height: "100%", display: "flex", alignItems: "center" }}>
                                         <HeatMap
+                                            className="h-full w-full"
                                             value={heatMapData}
                                             startDate={startDate}
                                             endDate={endDate}

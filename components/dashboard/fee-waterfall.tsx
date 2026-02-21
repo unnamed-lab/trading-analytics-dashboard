@@ -2,14 +2,14 @@
 
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import { ChartSkeleton } from "@/components/ui/dashboard-states";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ReferenceLine } from "recharts";
 import { TradeFilters } from "@/types";
 import { cn } from "@/lib/utils";
 
-export function FeeWaterfall({ filters }: { filters?: TradeFilters }) {
-    const { data: analytics, isLoading } = useTradeAnalytics(filters);
+export function FeeWaterfall({ filters: _propsFilters }: { filters?: TradeFilters }) {
+    const { analytics, isLoading } = useDashboard();
 
     if (isLoading || !analytics) return <ChartSkeleton />;
 

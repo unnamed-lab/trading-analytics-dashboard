@@ -1,5 +1,4 @@
 // hooks/use-trade-queries.ts
-import 'dotenv/config';
 import {
   useQuery,
   useInfiniteQuery,
@@ -287,6 +286,8 @@ export const useCalculatedPnL = () => {
 // ============================================
 // Full analytics using TradeAnalyticsCalculator
 // ============================================
+// Note: Dashboard components should use useDashboard() instead of this hook directly
+// to avoid redundant calculations across multiple components.
 export const useTradeAnalytics = (filters?: TradeFilters) => {
   const { data: trades = [], isLoading: isTradesLoading, isFetching: isTradesFetching } = useAllTrades({ filters });
   const { data: financials, isLoading: isFinLoading } = useFinancialDetails();

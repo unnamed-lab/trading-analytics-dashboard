@@ -43,16 +43,15 @@ const defaultIcons = {
 
 
 // ... imports
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 
 export default function KPIRow({
   analyticsProp,
 }: {
   analyticsProp?: Partial<AnalyticsSummary>;
 }) {
-  // Get analytics from the full report
-  const { data: analytics, isLoading: analyticsLoading, isError: analyticsError, refetch } = useTradeAnalytics();
-  const { data: pnlCalculatedTrades, isLoading: pnlLoading } = useCalculatedPnL();
-  const { data: rawTrades, isLoading: tradesLoading } = useAllTrades();
+  // Get analytics from the global dashboard context
+  const { analytics, trades: rawTrades, isLoading: contextLoading, isError: analyticsError, refetchTrades } = useDashboard();
 
   // Derive metrics from the full analytics report or fallback to calculated values
   const metrics = useMemo(() => {
@@ -70,47 +69,6 @@ export default function KPIRow({
         shortVolume: analytics.longShort?.shortVolume ?? 0,
         totalTrades: analytics.core?.totalTrades ?? 0,
         unrealizedPnL: analytics.core?.unrealizedPnl ?? 0,
-      };
-    }
-
-    // If we have PnL calculated trades but no analytics, derive basic metrics
-    if (pnlCalculatedTrades && pnlCalculatedTrades.length > 0) {
-      const totalPnl = pnlCalculatedTrades.reduce(
-        (sum, t) => sum + (t.pnl || 0),
-        0,
-      );
-      const totalVolume = pnlCalculatedTrades.reduce(
-        (sum, t) => sum + t.entryPrice * t.quantity,
-        0,
-      );
-      const totalFees = pnlCalculatedTrades.reduce(
-        (sum, t) => sum + (t.fees?.total || 0),
-        0,
-      );
-      const winningTrades = pnlCalculatedTrades.filter(
-        (t) => (t.pnl || 0) > 0,
-      ).length;
-      const winRate = (winningTrades / pnlCalculatedTrades.length) * 100;
-
-      const longTrades = pnlCalculatedTrades.filter(
-        (t) => t.side === "long" || t.side === "buy",
-      ).length;
-      const shortTrades = pnlCalculatedTrades.filter(
-        (t) => t.side === "short" || t.side === "sell",
-      ).length;
-
-      return {
-        totalPnl,
-        winRate,
-        totalVolume,
-        totalFees,
-        netPnL: totalPnl - totalFees,
-        longTrades,
-        shortTrades,
-        longVolume: 0, // Can calculate if needed
-        shortVolume: 0, // Can calculate if needed
-        totalTrades: pnlCalculatedTrades.length,
-        unrealizedPnL: 0,
       };
     }
 
@@ -161,9 +119,9 @@ export default function KPIRow({
       totalTrades: 0,
       unrealizedPnL: 0,
     };
-  }, [analytics, pnlCalculatedTrades, rawTrades]);
+  }, [analytics, rawTrades]);
 
-  const isLoading = analyticsLoading || pnlLoading || tradesLoading;
+  const isLoading = contextLoading;
 
   if (isLoading && !analyticsProp) {
     return (
@@ -179,7 +137,7 @@ export default function KPIRow({
     return (
       <DashboardError
         message="Failed to load KPI metrics"
-        onRetry={() => refetch()}
+        onRetry={() => refetchTrades()}
         className="min-h-[150px]"
       />
     );
@@ -209,7 +167,7 @@ export default function KPIRow({
       ? (finalMetrics.shortTrades / totalDirectionalTrades) * 100
       : 50;
 
-  const totalWithUnrealized = finalMetrics.netPnL + finalMetrics.unrealizedPnL;
+  const totalWithUnrealized = finalMetrics.totalPnl + finalMetrics.unrealizedPnL;
 
   const kpis = [
     {
@@ -220,7 +178,7 @@ export default function KPIRow({
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })}`,
-      sub: `Real: $${finalMetrics.netPnL.toFixed(0)} | Unr: $${finalMetrics.unrealizedPnL.toFixed(0)}`,
+      sub: `Realized: $${finalMetrics.totalPnl.toFixed(2)} | Unrealized: $${finalMetrics.unrealizedPnL.toFixed(2)}`,
       icon: defaultIcons.total,
       positive: totalWithUnrealized >= 0,
     },

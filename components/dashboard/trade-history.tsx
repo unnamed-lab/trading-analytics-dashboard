@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useAllTrades, useMockTrades } from "@/hooks/use-trade-queries";
+import { useMockTrades } from "@/hooks/use-trade-queries";
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { TradeRecord } from "@/types";
 import { formatSide, isBullishSide, formatPrice, formatPnl, formatQuantity } from "@/types";
@@ -33,16 +34,7 @@ const TradeHistory = ({
   }, [journals]);
 
   // Use real data if wallet is connected, otherwise use mock data
-  const {
-    data: realTrades = [],
-    isLoading: realLoading,
-    isError: realError,
-    refetch: refetchReal
-  } = useAllTrades({
-    enabled: connected && !!publicKey,
-    excludeFees: true,
-    filters,
-  });
+  const { trades: realTrades, isLoading: realLoading, isError: realError, refetchTrades: refetchReal } = useDashboard();
 
   const {
     data: mockTrades = [],
@@ -134,7 +126,7 @@ const TradeHistory = ({
 
         {/* Mobile View: Cards */}
         <div className="md:hidden px-4 pb-4 space-y-3">
-          {recentTrades.map((trade) => {
+          {recentTrades.map((trade: TradeRecord) => {
             const bullish = isBullishSide(trade.side);
             return (
               <div
@@ -211,7 +203,7 @@ const TradeHistory = ({
               </tr>
             </thead>
             <tbody>
-              {recentTrades.map((trade) => {
+              {recentTrades.map((trade: TradeRecord) => {
                 const bullish = isBullishSide(trade.side);
                 const journal = journalMap.get(trade.id);
 

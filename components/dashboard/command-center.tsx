@@ -3,7 +3,7 @@
 import React from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useTradeAnalytics } from "@/hooks/use-trade-queries";
+import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import { TradeFilters } from "@/types";
 import { RefreshCw } from "lucide-react";
 
@@ -21,22 +21,36 @@ export function CommandCenter({
     onFilterChange
 }: CommandCenterProps) {
     // Pass the active period to the hook to filter data
-    const result = useTradeAnalytics({ period: activePeriod });
-    const analytics = result.data;
-    const isFetching = result.isFetching; // Check if refreshing
+    const { analytics, isFetching, isLoading, currentPrices } = useDashboard();
+    const solPrice = currentPrices.get("SOL");
 
     const periods = ["24H", "7D", "30D", "ALL"];
 
-    // Fallback if data is ensuring layout doesn't jump too much
-    if (!analytics) return null;
+    // Fallback if data is loading, ensuring layout doesn't jump too much
+    if (isLoading || !analytics) {
+        return (
+            <div className="w-full relative py-3.5 h-[76px] flex items-center">
+                <div className="absolute inset-0 bg-background/80 backdrop-blur-md border-b border-border/50 shadow-sm" />
+                <div className="container mx-auto relative flex items-center justify-between px-4">
+                    <div className="flex gap-4 items-center">
+                        <div className="h-10 w-32 bg-muted/50 rounded-lg animate-pulse" />
+                        <div className="h-10 w-24 bg-muted/50 rounded-lg animate-pulse hidden sm:block" />
+                    </div>
+                    <div className="flex gap-2">
+                        <div className="h-8 w-40 bg-muted/50 rounded-lg animate-pulse hidden sm:block" />
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     const { totalPnL, realizedPnl = 0, unrealizedPnl = 0 } = analytics.core;
     const isProfitable = totalPnL >= 0;
 
     return (
-        <div className="w-full mb-6 z-50 relative py-3.5">
+        <div className="w-full relative py-3.5">
             <div className="absolute inset-0 bg-background/80 backdrop-blur-md border-b border-border/50 shadow-sm" />
-            <div className="container mx-auto relative flex flex-col sm:flex-row items-center justify-between gap-4 py-3 px-4">
+            <div className="container mx-auto relative flex flex-col sm:flex-row items-center justify-between gap-4 py-3 px-20">
                 {/* Left: Brand or Context */}
                 <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-8">
                     <div className="flex flex-col">
@@ -101,9 +115,15 @@ export function CommandCenter({
                     </div>
                 </div>
 
-                {/* Center: Sparkline placeholder */}
-                <div className="hidden md:flex flex-1 mx-8 h-10 items-center justify-center opacity-20">
-                    <div className="w-full max-w-md h-px bg-gradient-to-r from-transparent via-foreground to-transparent" />
+                {/* Center: Info/Price display */}
+                <div className="hidden md:flex flex-1 mx-8 items-center justify-center">
+                    {solPrice && (
+                        <div className="flex items-center gap-2 px-4 py-1.5 bg-sky-500/5 border border-sky-500/10 rounded-full">
+                            <div className="w-2 h-2 rounded-full bg-sky-500 animate-pulse shadow-[0_0_8px_rgba(14,165,233,0.8)]" />
+                            <span className="text-xs font-medium text-slate-400 tracking-wider">SOL/USD</span>
+                            <span className="text-sm font-semibold text-sky-400 font-mono">${solPrice.toFixed(2)}</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Right: Period Filter */}

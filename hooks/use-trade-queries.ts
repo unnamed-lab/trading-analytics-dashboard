@@ -123,6 +123,7 @@ export const useTradesInfinite = (limit: number = 50) => {
 // ============================================
 const useRawTrades = (options?: { excludeFees?: boolean }) => {
   const { fetcher, publicKey } = useTransactionFetcher();
+  const queryClient = useQueryClient();
 
   return useQuery({
     queryKey: tradeKeys.list(publicKey?.toString(), {
@@ -131,7 +132,23 @@ const useRawTrades = (options?: { excludeFees?: boolean }) => {
     }),
     queryFn: async (): Promise<TradeRecord[]> => {
       if (!publicKey) throw new Error("Wallet not connected");
-      return fetcher.fetchAllTransactions({ fees: options?.excludeFees });
+
+      const cacheKey = tradeKeys.list(publicKey.toString(), {
+        type: "raw",
+        fees: options?.excludeFees,
+      });
+
+      // Background sync: Fetch fresh data and update query cache silently
+      setTimeout(() => {
+        fetcher.fetchAllTransactions({ fees: options?.excludeFees })
+          .then((freshData) => {
+            queryClient.setQueryData(cacheKey, freshData);
+          })
+          .catch(console.error);
+      }, 0);
+
+      // Instantly return the pre-existing DB cache 
+      return fetcher.getCachedTrades({ fees: options?.excludeFees });
     },
     enabled: !!publicKey,
     staleTime: 5 * 60 * 1000, // 5 minutes raw cache
@@ -182,15 +199,40 @@ export const useAllTrades = (options?: {
 // ============================================
 export const useFinancialDetails = () => {
   const { fetcher, publicKey } = useTransactionFetcher();
+  const queryClient = useQueryClient();
 
   return useQuery({
     queryKey: ["financial-details", publicKey?.toString()],
     queryFn: async () => {
       if (!publicKey) throw new Error("Wallet not connected");
-      return fetcher.extractFinancialDetails();
+
+      const cacheKey = ["financial-details", publicKey.toString()];
+      const localStoreKey = `fin_cache_${publicKey.toString()}`;
+
+      // Background extract: Takes ~13s by scanning RPC.
+      // Update cache and LocalStorage when it finishes.
+      setTimeout(() => {
+        fetcher.extractFinancialDetails()
+          .then((freshFin) => {
+            try { localStorage.setItem(localStoreKey, JSON.stringify(freshFin)); } catch (e) { }
+            queryClient.setQueryData(cacheKey, freshFin);
+          })
+          .catch(console.error);
+      }, 0);
+
+      // Attempt to load from localStorage first for instant render
+      try {
+        const localCache = localStorage.getItem(localStoreKey);
+        if (localCache) return JSON.parse(localCache);
+      } catch (e) { }
+
+      // Fallback empty structure while loading for the first time
+      return null;
     },
     enabled: !!publicKey,
     staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 };
 

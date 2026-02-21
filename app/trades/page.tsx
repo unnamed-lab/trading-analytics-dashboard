@@ -27,7 +27,7 @@ import { useJournals } from "@/hooks/use-journals"; // Added hook
 import bs58 from "bs58"; // Added bs58 for signer
 
 const ITEMS_PER_PAGE = 20;
-const periods = ["All", "7D", "30D"];
+const periods = ["All", "24H", "7D", "30D"];
 
 const TradeHistoryPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
@@ -104,7 +104,10 @@ const TradeHistoryPage = () => {
       const now = new Date();
       const cutoff = new Date();
 
-      if (activePeriod === "7D") {
+      if (activePeriod === "24H") {
+        cutoff.setDate(now.getDate() - 1);
+        filtered = filtered.filter((t) => new Date(t.timestamp) >= cutoff);
+      } else if (activePeriod === "7D") {
         cutoff.setDate(now.getDate() - 7);
         filtered = filtered.filter((t) => new Date(t.timestamp) >= cutoff);
       } else if (activePeriod === "30D") {
@@ -253,43 +256,36 @@ const TradeHistoryPage = () => {
           <div className="w-px h-6 bg-border" />
 
           {/* Symbol filter */}
-          <button
-            className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary transition-colors"
+          <select
+            value={symbolFilter}
+            onChange={(e) => setSymbolFilter(e.target.value)}
+            className="rounded border border-border px-3 py-1.5 text-sm bg-transparent outline-none hover:bg-secondary focus:border-primary transition-colors cursor-pointer"
           >
-            {symbolFilter}
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
-          {symbolFilter === "All Symbols" && (
-            <div className="absolute mt-8 bg-card border border-border rounded-lg shadow-lg hidden group-hover:block">
-              {uniqueSymbols.map(s => (
-                <button
-                  key={s}
-                  className="block w-full text-left px-4 py-2 text-sm hover:bg-secondary"
-                  onClick={() => setSymbolFilter(s)}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
+            {uniqueSymbols.map(s => (
+              <option key={s} value={s} className="bg-card text-foreground">{s}</option>
+            ))}
+          </select>
 
           {/* Side filter */}
-          <button
-            className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary transition-colors"
+          <select
+            value={sideFilter}
+            onChange={(e) => setSideFilter(e.target.value as "all" | "long" | "short")}
+            className="rounded border border-border px-3 py-1.5 text-sm bg-transparent outline-none hover:bg-secondary focus:border-primary transition-colors cursor-pointer"
           >
-            {sideFilter === "all" ? "All Sides" : sideFilter === "long" ? "Long Only" : "Short Only"}
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
+            <option value="all" className="bg-card text-foreground">All Sides</option>
+            <option value="long" className="bg-card text-foreground">Long Only</option>
+            <option value="short" className="bg-card text-foreground">Short Only</option>
+          </select>
 
           {/* Sort controls */}
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as "date" | "pnl" | "price")}
-            className="rounded border border-border px-3 py-1.5 text-sm bg-transparent"
+            className="rounded border border-border px-3 py-1.5 text-sm bg-transparent outline-none hover:bg-secondary focus:border-primary transition-colors cursor-pointer"
           >
-            <option value="date">Sort by Date</option>
-            <option value="pnl">Sort by PnL</option>
-            <option value="price">Sort by Price</option>
+            <option value="date" className="bg-card text-foreground">Sort by Date</option>
+            <option value="pnl" className="bg-card text-foreground">Sort by PnL</option>
+            <option value="price" className="bg-card text-foreground">Sort by Price</option>
           </select>
 
           <button
@@ -454,7 +450,7 @@ const TradeHistoryPage = () => {
               Showing{" "}
               <span className="font-mono font-bold text-foreground">
                 {(currentPage - 1) * ITEMS_PER_PAGE + 1}
-              </span>{" "}
+              </span>{" - "}
               <span className="font-mono font-bold text-foreground">
                 {Math.min(currentPage * ITEMS_PER_PAGE, filteredTrades.length)}
               </span>{" "}

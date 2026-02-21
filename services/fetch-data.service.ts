@@ -292,6 +292,21 @@ export class TransactionDataFetcher {
     };
   }
 
+  async getCachedTrades({
+    fees,
+  }: { fees?: boolean } | undefined = {}): Promise<TradeRecord[]> {
+    if (!this.walletPublicKey) throw new Error("Wallet not initialized");
+    const owner = this.walletPublicKey.toString();
+    const cachedTrades = await getTradesAction(owner);
+    const tradesWithPnL = this.applyPnL(cachedTrades);
+    const allTrades = tradesWithPnL.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    return allTrades.filter((t) =>
+      fees
+        ? true
+        : !t.logType?.includes("Fees") && !t.orderType?.includes("fee"),
+    );
+  }
+
   async fetchAllTransactions({
     fees,
   }: { fees?: boolean } | undefined = {}): Promise<TradeRecord[]> {
